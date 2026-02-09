@@ -241,7 +241,7 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "center",
   },
 
-  // key: align cards to the top and let them be their natural height
+  // key: align cards to the top and let them be their natural heighta
   heroGrid: {
     width: "min(1040px, 100%)",
     display: "grid",
