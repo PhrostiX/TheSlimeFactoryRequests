@@ -181,36 +181,6 @@ export default function SearchPage() {
   const hasSearched = query.trim().length > 0;
 
   useEffect(() => {
-    setCurrentPage(1);
-  }, [query, mode]);
-
-  useEffect(() => {
-    const q = query.trim();
-    if (!q) {
-      setRows([]);
-      return;
-    }
-
-    setLoading(true);
-
-    const params = new URLSearchParams({
-      page: "1",
-      limit: "10000",
-      search: q,
-      searchMode: mode,
-      sortBy: "latest",
-    });
-
-    fetch(`/api/requests?${params}`)
-      .then((r) => r.json())
-      .then((response) => {
-        setRows(response.data || []);
-        setLoading(false);
-      })
-      .catch(() => {
-        setRows([]);
-        setLoading(false);
-      });
   }, [mode, query]);
 
   return (
@@ -227,28 +197,16 @@ export default function SearchPage() {
             </p>
           </div>
 
-          <div style={styles.searchForm} className="animate-float-slow">
-            <label style={styles.label}>
-              <span style={styles.labelText}>Search by:</span>
-              <select
-                value={mode}
-                onChange={(e) => setMode(e.target.value as SearchMode)}
-                style={styles.select}
-                className="frosted-glass"
-              >
-                <option value="level_id">Level ID</option>
-                <option value="in_game_name">In-game Username</option>
-              </select>
-            </label>
-
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={mode === "level_id" ? "Type a Level ID..." : "Type an in-game username..."}
-              style={styles.input}
-              className="frosted-glass"
-            />
-          </div>
+          {/* SIMPLE SEARCH BAR + FILTER TOGGLE */}
+          <div style={styles.searchBarRow} className="frosted-glass">
+            <div style={styles.searchLeft}>
+              <Label>Search (ID / level name / uploader)</Label>
+              <MiniInput
+                value={filters.text}
+                onChange={(e) => setFilters((p) => ({ ...p, text: e.target.value }))}
+                placeholder="Try: 87284332, Epilogue, baberich..."
+              />
+            </div>
 
           {loading && <div style={styles.loadingState}>Loading results...</div>}
 
