@@ -1,37 +1,27 @@
 @import "tailwindcss";
 
-/* ===================== BASE THEME ===================== */
+/* ===================== BASE THEME (FORCED DARK) ===================== */
 @layer base {
   :root {
-    --background: #ffffff;
-    --foreground: #171717;
+    /* Force dark tokens as defaults */
+    --background: #0a0a0a;
+    --foreground: #ededed;
 
-    --accent: #3b82f6;
-    --accent-light: #60a5fa;
+    --accent: #60a5fa;
+    --accent-light: #93c5fd;
 
-    --glass-bg: rgba(255, 255, 255, 0.7);
-    --glass-border: rgba(255, 255, 255, 0.18);
-    --shadow-color: rgba(0, 0, 0, 0.1);
+    --glass-bg: rgba(17, 17, 17, 0.7);
+    --glass-border: rgba(255, 255, 255, 0.1);
+    --shadow-color: rgba(0, 0, 0, 0.3);
 
-    /* ✅ NEW: shared “system” tokens */
+    /* ✅ shared “system” tokens */
     --ui-ring: rgba(255, 255, 255, 0.14);
     --ui-ring-strong: rgba(255, 255, 255, 0.22);
     --ui-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
     --ui-inset: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  }
 
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --background: #0a0a0a;
-      --foreground: #ededed;
-
-      --accent: #60a5fa;
-      --accent-light: #93c5fd;
-
-      --glass-bg: rgba(17, 17, 17, 0.7);
-      --glass-border: rgba(255, 255, 255, 0.1);
-      --shadow-color: rgba(0, 0, 0, 0.3);
-    }
+    /* ✅ Force browser UI (iOS Safari, form controls, scrollbars) into dark */
+    color-scheme: dark;
   }
 
   * {
@@ -43,8 +33,15 @@
   }
 
   body {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+    /* Force dark background always */
+    background: linear-gradient(
+      135deg,
+      #1e3a8a 0%,
+      #312e81 50%,
+      #4c1d95 100%
+    );
     background-attachment: fixed;
+
     color: var(--foreground);
     font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
     min-height: 100vh;
@@ -52,18 +49,6 @@
     /* premium layering support */
     position: relative;
     overflow-x: hidden;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    body {
-      background: linear-gradient(
-        135deg,
-        #1e3a8a 0%,
-        #312e81 50%,
-        #4c1d95 100%
-      );
-      background-attachment: fixed;
-    }
   }
 }
 
@@ -215,7 +200,7 @@
     transform: translateY(0);
   }
 
-  /* ✅ NEW: consistent “pro” card system (optional class to add) */
+  /* ✅ consistent “pro” card system (optional class to add) */
   .ui-card {
     border: 1px solid var(--ui-ring);
     box-shadow: var(--ui-shadow), var(--ui-inset);
@@ -281,7 +266,7 @@ body::before {
   opacity: 0.75;
 }
 
-/* ✅ NEW: subtle vignette “lighting pass” that makes it feel finished */
+/* ✅ subtle vignette “lighting pass” that makes it feel finished */
 body::after {
   content: "";
   position: fixed;
