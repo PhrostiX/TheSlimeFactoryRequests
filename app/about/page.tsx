@@ -123,7 +123,7 @@ export default function AboutPage() {
             />
 
             <p style={styles.heroSub}>
-              A transparant way to track your level requests,
+              A transparent way to track your level requests,
               review progress, sends, and outcomes.
             </p>
           </div>

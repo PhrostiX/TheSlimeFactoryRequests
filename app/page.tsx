@@ -157,7 +157,12 @@ export default function HomePage() {
                 tone="purple"
                 icon="clock"
               />
-              <ActionBtn href="/contact" label="Send Feedback" tone="orange" icon="mail" />
+              <ActionBtn
+                href="https://discord.gg/3Sctyn3ekP"
+                label="Send feedback"
+                tone="orange"
+                icon="mail"
+              />
             </div>
           </section>
 
