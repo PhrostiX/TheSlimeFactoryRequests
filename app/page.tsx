@@ -1,447 +1,627 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import TabNav from "./components/TabNav";
 
-type StatsRow = {
-  involved_confirm?: string;
-  send_count?: string;
-  status?: string;
+type Review = {
+  type: number;
+  date: number;
+  note?: string | null;
 };
 
-function isInvolved(v?: string) {
-  return (v || "").toLowerCase().includes("i was involved");
+type MongoRequest = {
+  _id?: any;
+  checkFilter?: boolean;
+  createdAt?: string;
+  levelInfo?: {
+    difficulties?: number[] | null;
+  } | null;
+  reviews?: Record<string, Review> | null;
+  status?: "pending" | "sending" | "rated" | "rejected" | "stolen" | "dne";
+  sendCount?: number;
+  sends?: any[];
+};
+
+type TagKey = "pending" | "sending" | "rated" | "rejected" | "stolen" | "dne";
+
+function isInvolvedMongo(r: MongoRequest) {
+  return r.checkFilter === true;
 }
 
-function toSendCount(v?: any) {
-  const n = Number(String(v ?? "").trim());
-  return Number.isFinite(n) ? n : 0;
+function latestReview(r: MongoRequest): Review | null {
+  const obj = r.reviews || null;
+  if (!obj) return null;
+  const list = Object.values(obj).filter(Boolean);
+  if (!list.length) return null;
+  list.sort((a, b) => (b.date ?? 0) - (a.date ?? 0));
+  return list[0] ?? null;
 }
 
-function statusIncludes(status: any, needle: string) {
-  return String(status ?? "").toLowerCase().includes(needle);
+function statusFromRequest(r: MongoRequest): TagKey {
+  const s = (r.status || "").toLowerCase();
+  if (s === "sending") return "sending";
+  if (s === "rated") return "rated";
+  if (s === "rejected") return "rejected";
+  if (s === "stolen") return "stolen";
+  if (s === "dne") return "dne";
+  if (s === "pending") return "pending";
+
+  if (typeof r.sendCount === "number" && r.sendCount > 0) return "sending";
+  if (Array.isArray(r.sends) && r.sends.length > 0) return "sending";
+
+  const rev = latestReview(r);
+  if (!rev) return "pending";
+  const t = Number(rev.type);
+  if (t > 0) return "sending";
+  if (t === -2) return "sending";
+  if (t === -3) return "rated";
+  if (t === -1) return "rejected";
+  if (t === -4) return "stolen";
+  if (t === -5) return "dne";
+  return "pending";
 }
 
 export default function HomePage() {
-  const [rows, setRows] = useState<StatsRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState<string>("—");
+  const [rows, setRows] = useState<MongoRequest[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<string>("");
 
   useEffect(() => {
     setLoading(true);
-
-    const params = new URLSearchParams({
-      page: "1",
-      limit: "10000",
-      sortBy: "latest",
-    });
-
-    fetch(`/api/requests?${params}`, { cache: "no-store" })
+    const params = new URLSearchParams({ page: "1", limit: "10000", sortBy: "latest" });
+    fetch(`/api/requests?${params}`)
       .then((r) => r.json())
-      .then((data) => {
-        setRows(Array.isArray(data?.data) ? data.data : []);
-        setLastUpdated(new Date().toLocaleString());
+      .then((response) => {
+        const items: MongoRequest[] = response.items || [];
+        setRows(items);
+        setUpdatedAt(new Date().toLocaleString());
         setLoading(false);
       })
       .catch(() => {
         setRows([]);
-        setLastUpdated(new Date().toLocaleString());
+        setUpdatedAt(new Date().toLocaleString());
         setLoading(false);
       });
   }, []);
 
+  const involved = useMemo(() => rows.filter(isInvolvedMongo), [rows]);
+
   const stats = useMemo(() => {
-    const involved = rows.filter((r) => isInvolved(r.involved_confirm));
+    let total = involved.length;
+    let pending = 0;
+    let sent = 0;
+    let rated = 0;
+    let rejected = 0;
 
-    const totalRequests = involved.length;
-    const pendingReview = involved.filter((r) => statusIncludes(r.status, "pending")).length;
-    const sent = involved.filter((r) => toSendCount(r.send_count) > 0).length;
-    const rated = involved.filter((r) => statusIncludes(r.status, "rated")).length;
-    const rejected = involved.filter((r) => statusIncludes(r.status, "reject")).length;
+    for (const r of involved) {
+      const st = statusFromRequest(r);
+      if (st === "pending") pending++;
+      else if (st === "sending") sent++;
+      else if (st === "rated") rated++;
+      else if (st === "rejected") rejected++;
+    }
 
-    return { totalRequests, pendingReview, sent, rated, rejected };
-  }, [rows]);
+    return { total, pending, sent, rated, rejected };
+  }, [involved]);
 
   return (
     <>
       <TabNav />
-
       <main style={styles.page}>
-        {/* Logo */}
-        <div style={styles.logoWrap} className="animate-float-slow">
-          <img
-            src="/slimefactory-requests.png"
-            alt="The Slime Factory Requests"
-            style={styles.logo}
-            onError={(e) => {
-              (e.currentTarget.style.display as any) = "none";
-            }}
-          />
-        </div>
+        <div style={styles.container}>
+          {/* Logo (no card, matches the reference) */}
+          <div style={styles.logoWrap}>
+            <img
+              src="/slimefactory-requests.png"
+              alt="The Slime Factory Requests"
+              style={styles.logo}
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = "none";
+              }}
+            />
+          </div>
+          <div style={styles.subtitle}>Geometry Dash Level Request Tracker</div>
 
-        {/* Plain subtitle (NOT a pill/button) */}
-        <div style={styles.subtitle}>
-          Geometry Dash Level Request Tracker
-        </div>
-
-        {/* Top section: stats + actions (no stretching / no empty space) */}
-        <section style={styles.heroGrid}>
-          {/* Stats (new creative layout) */}
-          <div style={styles.statsCard} className="frosted-glass-strong">
-            <div style={styles.statsHeader}>
-              <h2 style={styles.statsTitle}>Global Stats</h2>
-              <div style={styles.statsMeta}>
-                <span style={{ opacity: 0.85 }}>*Involved-only</span>
-                <span style={{ opacity: 0.55 }}>•</span>
-                <span style={{ opacity: 0.85 }}>
-                  {loading ? "Updating…" : `Last updated: ${lastUpdated}`}
-                </span>
+          {/* Global Stats bar */}
+          <section style={styles.statsPanel} className="frosted-glass-strong slimePanel">
+            <div style={styles.panelTopRow}>
+              <div>
+                <div style={styles.panelHeader}>Global Stats</div>
+                <div style={styles.panelMeta}>
+                  <span style={styles.metaAsterisk}>All requested levels</span>
+                  <span style={styles.metaDot}>•</span>
+                  <span>Last updated: {updatedAt || "—"}</span>
+                </div>
               </div>
             </div>
 
-            {loading ? (
-              <div style={styles.loading}>Loading…</div>
-            ) : (
-              <div style={styles.statGrid}>
-                <StatTile label="Total" value={stats.totalRequests} tone="total" />
-                <StatTile label="Pending" value={stats.pendingReview} tone="pending" />
-                <StatTile label="Sent" value={stats.sent} tone="sent" />
-                <StatTile label="Rated" value={stats.rated} tone="rated" />
-                <StatTile label="Rejected" value={stats.rejected} tone="rejected" />
-              </div>
-            )}
-          </div>
+            <div className="homePillRow" style={styles.pillRow}>
+              <StatPill title="Total" value={loading ? "…" : stats.total} tone="total" icon="user" />
+              <StatPill title="Pending" value={loading ? "…" : stats.pending} tone="pending" icon="clock" />
+              <StatPill title="Sent" value={loading ? "…" : stats.sent} tone="sent" icon="send" />
+              <StatPill title="Rated" value={loading ? "…" : stats.rated} tone="rated" icon="sad" />
+              <StatPill title="Rejected" value={loading ? "…" : stats.rejected} tone="rejected" icon="x" />
+            </div>
+          </section>
 
-          {/* Actions (auto height, compact, no dead space) */}
-          <div style={styles.actionsCard} className="frosted-glass-strong">
-            <h2 style={styles.actionsTitle}>Quick Actions</h2>
+          {/* Quick Actions row */}
+          <section style={styles.quickPanel}>
+            <div style={styles.quickHeader}>Quick Actions</div>
+            <div className="homeQuickRow" style={styles.quickRow}>
+              <ActionBtn href="/search" label="Search" tone="blue" icon="search" />
+              <ActionBtn href="/search?preset=sends" label="Latest Sends" tone="green" icon="rocket" />
+              <ActionBtn
+                href="/search?preset=submissions"
+                label="Latest Submissions"
+                tone="purple"
+                icon="clock"
+              />
+              <ActionBtn href="/contact" label="Send Feedback" tone="orange" icon="mail" />
+            </div>
+          </section>
 
-            <div style={styles.actions}>
-              <a href="/search" style={{ ...styles.actionBtn, ...styles.btnSearch }} className="premium-btn">
-                Search
-              </a>
-
-              <a href="/latest-sends" style={{ ...styles.actionBtn, ...styles.btnSends }} className="premium-btn">
-                Latest Sends
-              </a>
-
-              <a href="/latest-submissions" style={{ ...styles.actionBtn, ...styles.btnSubs }} className="premium-btn">
-                Latest Submissions
-              </a>
-            <p style={styles.actionsSubtext}>
-              Browse requests, search submissions, and view recent sends.
+          {/* About */}
+          <section style={styles.about} className="frosted-glass-strong">
+            <h2 style={styles.aboutTitle}>How do I submit a level?</h2>
+            <p style={styles.aboutText}>
+              Please join our discord and use the slime requester bot. You may request your level any time — the requests do not close — but be aware that the bot is in beta and might have issues.
             </p>
-          </div>
-              <a
-                href="https://forms.gle/"
-                target="_blank"
-                rel="noreferrer"
-                style={styles.feedbackBtn}
-                className="premium-btn"
-              >
-                Send Feedback
-              </a>
-            </div>
-        </section>
-
-        {/* About */}
-        <section style={styles.about} className="frosted-glass-strong">
-          <h2 style={styles.aboutTitle}>About This Database</h2>
-
-          <p style={styles.aboutText}>
-            This website is a Geometry Dash request dashboard designed to make level submissions easier to browse, search, and track.
-            Requests are submitted through a Google Form and automatically stored in a Google Spreadsheet, which this site pulls from.
-          </p>
-
-          <h3 style={styles.aboutSubTitle}>How it works</h3>
-          <p style={styles.aboutText}>
-            Users submit a request with a level ID and a video link. Mods can review, send, and update statuses in the sheet—your website reflects
-            those updates.
-          </p>
-        </section>
+            <div style={styles.aboutSubTitle}>How it works</div>
+            <p style={styles.aboutText}>
+              Request with your level ID and a video link (if required). We will ping you when we work with your level, including sends, rejects, and status changes.
+            </p>
+          </section>
+        </div>
       </main>
-
-      <style jsx>{`
-        /* Small hover polish */
-        a.premium-btn:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 16px 42px rgba(0,0,0,0.32);
-        }
-        a.premium-btn:active {
-          transform: translateY(0px);
-          opacity: 0.96;
-        }
-      `}</style>
     </>
   );
 }
 
-function StatTile({
-  label,
+function StatPill({
+  title,
   value,
   tone,
+  icon,
 }: {
-  label: string;
-  value: number;
+  title: string;
+  value: React.ReactNode;
   tone: "total" | "pending" | "sent" | "rated" | "rejected";
+  icon: IconName;
 }) {
-  const toneStyle =
-    tone === "pending"
-      ? styles.tonePending
-      : tone === "sent"
-        ? styles.toneSent
-        : tone === "rated"
-          ? styles.toneRated
-          : tone === "rejected"
-            ? styles.toneRejected
-            : styles.toneTotal;
-
   return (
-    <div style={{ ...styles.statTile, ...toneStyle }}>
-      <div style={styles.statLabel}>{label}</div>
-      <div style={styles.statValue}>{value}</div>
+    <div style={{ ...styles.pill, ...(toneStyles[tone] || {}) }}>
+      <div style={styles.pillLeft}
+      >
+        <div style={styles.pillTitle}>{title}</div>
+        <div style={styles.pillValue}>{value}</div>
+      </div>
+      <div style={styles.pillIconWrap} aria-hidden="true">
+        <Icon name={icon} />
+      </div>
     </div>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: "100vh",
-    paddingTop: 92,
-    paddingLeft: 24,
-    paddingRight: 24,
-    paddingBottom: 56,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 14,
-  },
+type IconName =
+  | "user"
+  | "clock"
+  | "send"
+  | "sad"
+  | "x"
+  | "search"
+  | "rocket"
+  | "mail";
 
-  logoWrap: {
-    width: "min(1040px, 100%)",
-    display: "flex",
-    justifyContent: "center",
-    marginTop: 6,
-  },
-  logo: {
-    width: "min(560px, 100%)",
-    height: "auto",
-    borderRadius: 18,
-    boxShadow: "0 18px 60px rgba(0,0,0,0.35)",
-  },
+function Icon({ name }: { name: IconName }) {
+  const common = {
+    width: 22,
+    height: 22,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    xmlns: "http://www.w3.org/2000/svg",
+  } as const;
 
-  subtitle: {
-    marginTop: 2,
-    marginBottom: 10,
-    fontSize: 16,
-    fontWeight: 800,
-    color: "rgba(255,255,255,0.92)",
-    textShadow: "0 10px 26px rgba(0,0,0,0.35)",
-    letterSpacing: 0.2,
-    textAlign: "center",
-  },
+  if (name === "user") {
+    return (
+      <svg {...common}>
+        <path
+          d="M20 21a8 8 0 0 0-16 0"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+        <path
+          d="M12 13a4 4 0 1 0-4-4 4 4 0 0 0 4 4Z"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  if (name === "clock") {
+    return (
+      <svg {...common}>
+        <path
+          d="M12 22a10 10 0 1 0-10-10 10 10 0 0 0 10 10Z"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <path
+          d="M12 6v6l4 2"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  if (name === "send") {
+    return (
+      <svg {...common}>
+        <path
+          d="M22 2 11 13"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M22 2 15 22l-4-9-9-4 20-7Z"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  if (name === "sad") {
+    return (
+      <svg {...common}>
+        <path
+          d="M12 22a10 10 0 1 0-10-10 10 10 0 0 0 10 10Z"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <path
+          d="M8.5 9.5h.01M15.5 9.5h.01"
+          stroke="currentColor"
+          strokeWidth="3"
+          strokeLinecap="round"
+        />
+        <path
+          d="M16 16a4.5 4.5 0 0 0-8 0"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  if (name === "x") {
+    return (
+      <svg {...common}>
+        <path
+          d="M18 6 6 18M6 6l12 12"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  if (name === "search") {
+    return (
+      <svg {...common}>
+        <path
+          d="M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16Z"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <path
+          d="M21 21l-4.35-4.35"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  if (name === "rocket") {
+    return (
+      <svg {...common}>
+        <path
+          d="M14 4c3 0 6 3 6 6-1.2 3.6-4.9 7.3-8.5 8.5-1.2.4-2.6.1-3.4-.7l-2.4-2.4c-.8-.8-1.1-2.2-.7-3.4C6.7 8.9 10.4 5.2 14 4Z"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M10 14 8 12"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+        <path
+          d="M13 7h0"
+          stroke="currentColor"
+          strokeWidth="4"
+          strokeLinecap="round"
+        />
+        <path
+          d="M6.5 19.5 4 20l.5-2.5L7 15l2 2-2.5 2.5Z"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  // mail
+  return (
+    <svg {...common}>
+      <path
+        d="M4 6h16v12H4V6Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m4 8 8 6 8-6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
-  // key: align cards to the top and let them be their natural heighta
-  heroGrid: {
-    width: "min(1040px, 100%)",
-    display: "grid",
-    gridTemplateColumns: "1.1fr 1fr",
-    gap: 18,
-    alignItems: "start",
-  },
+function ActionBtn({
+  href,
+  label,
+  tone,
+  icon,
+}: {
+  href: string;
+  label: string;
+  tone: "blue" | "green" | "purple" | "orange";
+  icon: IconName;
+}) {
+  const toneStyle =
+    tone === "blue"
+      ? styles.btnBlue
+      : tone === "green"
+        ? styles.btnGreen
+        : tone === "purple"
+          ? styles.btnPurple
+          : styles.btnOrange;
 
-  statsCard: {
-    padding: 20,
-    borderRadius: 22,
-  },
-  statsHeader: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 6,
-    marginBottom: 14,
-  },
-  statsTitle: {
-    margin: 0,
-    fontSize: 18,
-    fontWeight: 950,
-    color: "var(--foreground)",
-  },
-  statsMeta: {
-    display: "flex",
-    gap: 10,
-    flexWrap: "wrap",
-    fontSize: 12,
-    color: "var(--foreground)",
-  },
+  return (
+    <Link href={href} className="homeQuickBtn" style={{ ...styles.quickBtn, ...toneStyle }}>
+      <span style={styles.quickBtnIcon} aria-hidden="true">
+        <Icon name={icon} />
+      </span>
+      <span>{label}</span>
+    </Link>
+  );
+}
 
-  loading: {
-    padding: 18,
-    opacity: 0.75,
-    fontSize: 14,
-    color: "var(--foreground)",
-  },
-
-  // New “creative” stats layout: compact grid tiles
-  statGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: 12,
-  },
-  statTile: {
-    borderRadius: 18,
-    padding: "14px 14px",
-    background: "rgba(0,0,0,0.18)",
-    border: "1px solid rgba(255,255,255,0.10)",
-    boxShadow: "0 12px 24px rgba(0,0,0,0.22)",
-    minHeight: 86,
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "space-between",
-  },
-  statLabel: {
-    fontSize: 12,
-    fontWeight: 900,
-    opacity: 0.88,
-    color: "var(--foreground)",
-    letterSpacing: 0.2,
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: 950,
-    color: "var(--foreground)",
-    letterSpacing: 0.2,
-  },
-
-  // Neon-ish borders per tile
-  toneTotal: {
-    border: "1px solid rgba(59,130,246,0.28)",
-    boxShadow: "0 0 0 1px rgba(59,130,246,0.12), 0 12px 24px rgba(0,0,0,0.22)",
-  },
-  tonePending: {
-    border: "1px solid rgba(245,158,11,0.30)",
-    boxShadow: "0 0 0 1px rgba(245,158,11,0.12), 0 12px 24px rgba(0,0,0,0.22)",
-  },
-  toneSent: {
-    border: "1px solid rgba(16,185,129,0.30)",
-    boxShadow: "0 0 0 1px rgba(16,185,129,0.12), 0 12px 24px rgba(0,0,0,0.22)",
-  },
-  toneRated: {
-    border: "1px solid rgba(168,85,247,0.30)",
-    boxShadow: "0 0 0 1px rgba(168,85,247,0.12), 0 12px 24px rgba(0,0,0,0.22)",
-  },
-  toneRejected: {
-    border: "1px solid rgba(236,72,153,0.30)",
-    boxShadow: "0 0 0 1px rgba(236,72,153,0.12), 0 12px 24px rgba(0,0,0,0.22)",
-  },
-
-  actionsCard: {
-    flex: "1 1 520px",
-    minWidth: 340,
-    padding: 22,
-    borderRadius: 20,
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "flex-start",
-    height: "100%", // ✅ makes it match the left card height
-  },
-  actionsTitle: {
-    margin: 0,
-    fontSize: 18,
-    fontWeight: 950,
-    color: "var(--foreground)",
-  },
-  actions: {
-    display: "grid",
-    gap: 12,
-    marginTop: 12,
-    flexGrow: 1, // ✅ fills the card so it stretches downward
-  },
-
-  // Buttons: compact + non-grey, no dead space
-  actionBtn: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "14px 16px",
-    borderRadius: 14,
-    textDecoration: "none",
-    fontWeight: 950,
-    fontSize: 15,
-    color: "rgba(255,255,255,0.92)",
-    border: "1px solid rgba(255,255,255,0.16)",
-    boxShadow: "0 10px 28px rgba(0,0,0,0.28)",
-    transition: "all 220ms cubic-bezier(0.4, 0, 0.2, 1)",
-  },
-  btnSearch: {
-    background: "linear-gradient(135deg, rgba(59,130,246,0.30), rgba(37,99,235,0.16))",
-  },
-  btnSends: {
-    background: "linear-gradient(135deg, rgba(16,185,129,0.30), rgba(34,197,94,0.16))",
-  },
-  btnSubs: {
-    background: "linear-gradient(135deg, rgba(168,85,247,0.30), rgba(236,72,153,0.16))",
-  },
-  btnFeedback: {
-    color: "#111827",
-    background: "linear-gradient(135deg, rgba(245,158,11,0.95), rgba(251,191,36,0.85))",
-  },
-
-  feedbackBtn: {
-    width: "fit-content",
-    minWidth: "unset",
-    justifySelf: "center",
-    alignSelf: "center",
-
-    marginTop: 16,
-    padding: "10px 18px",
-    borderRadius: 14,
-    fontWeight: 950,
-    fontSize: 14,
-    textDecoration: "none",
-    color: "#111827",
-    border: "1px solid rgba(255,255,255,0.18)",
+const toneStyles: Record<string, React.CSSProperties> = {
+  total: {
     background:
-      "linear-gradient(135deg, rgba(245,158,11,0.95), rgba(251,191,36,0.85))",
-    boxShadow: "0 12px 30px rgba(0,0,0,0.28)",
-    transition: "all 220ms cubic-bezier(0.4, 0, 0.2, 1)",
+      "linear-gradient(135deg, rgba(147, 255, 68, 0.95), rgba(26, 200, 92, 0.60))",
+    boxShadow:
+      "0 10px 24px rgba(34,197,94,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
   },
-
-  actionsSubtext: {
-    margin: 0,
-    textAlign: "center",
-    fontSize: 13,
-    opacity: 0.8,
-    color: "var(--foreground)",
+  pending: {
+    background:
+      "linear-gradient(135deg, rgba(255, 208, 64, 0.95), rgba(235, 176, 36, 0.62))",
+    boxShadow:
+      "0 10px 24px rgba(245,158,11,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
   },
-
-  about: {
-    width: "min(1040px, 100%)",
-    padding: "26px 26px",
-    borderRadius: 22,
-    marginTop: 8,
+  sent: {
+    background:
+      "linear-gradient(135deg, rgba(55, 230, 255, 0.95), rgba(56, 189, 248, 0.60))",
+    boxShadow:
+      "0 10px 24px rgba(56,189,248,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
   },
-  aboutTitle: {
-    margin: 0,
-    marginBottom: 12,
-    fontSize: 28,
-    fontWeight: 950,
-    color: "var(--foreground)",
+  rated: {
+    background:
+      "linear-gradient(135deg, rgba(255, 90, 220, 0.95), rgba(217, 70, 239, 0.58))",
+    boxShadow:
+      "0 10px 24px rgba(217,70,239,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
   },
-  aboutSubTitle: {
-    margin: "14px 0 8px 0",
-    fontSize: 16,
-    fontWeight: 950,
-    color: "var(--foreground)",
-  },
-  aboutText: {
-    margin: 0,
-    fontSize: 14,
-    lineHeight: 1.5,
-    opacity: 0.9,
-    color: "var(--foreground)",
+  rejected: {
+    background:
+      "linear-gradient(135deg, rgba(255, 85, 85, 0.92), rgba(239, 68, 68, 0.55))",
+    boxShadow:
+      "0 10px 24px rgba(239,68,68,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
   },
 };
 
-// Simple responsive fallback for small screens
-// (Next/React inline styles can’t do media queries; this grid still wraps okay,
-// but if you want perfect mobile we can move heroGrid to CSS)
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    minHeight: "100vh",
+    paddingTop: 110,
+    paddingLeft: 22,
+    paddingRight: 22,
+    paddingBottom: 28,
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "flex-start",
+  },
+  container: {
+    width: "min(1100px, 100%)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 18,
+  },
+
+  logoWrap: {
+    display: "flex",
+    justifyContent: "center",
+    paddingTop: 10,
+  },
+  logo: {
+    width: "min(560px, 95%)",
+    height: "auto",
+    filter: "drop-shadow(0 18px 40px rgba(0,0,0,0.45))",
+  },
+  subtitle: {
+    textAlign: "center",
+    fontWeight: 850,
+    opacity: 0.85,
+    marginTop: -4,
+  },
+
+  statsPanel: {
+    borderRadius: 18,
+    padding: "16px 18px 18px 18px",
+    border: "1px solid rgba(255,255,255,0.12)",
+  },
+  panelTopRow: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 10,
+  },
+  panelHeader: {
+    fontWeight: 950,
+    fontSize: 16,
+    marginBottom: 6,
+  },
+  panelMeta: {
+    fontSize: 12,
+    opacity: 0.8,
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 8,
+    alignItems: "center",
+  },
+  metaAsterisk: {
+    fontWeight: 900,
+  },
+  metaDot: {
+    opacity: 0.55,
+  },
+
+  pillRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+    gap: 12,
+  },
+  pill: {
+    borderRadius: 14,
+    minHeight: 76,
+    padding: "12px 14px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    border: "1px solid rgba(0,0,0,0.20)",
+    color: "rgba(10, 12, 20, 0.92)",
+    overflow: "hidden",
+    position: "relative",
+  },
+  pillLeft: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+  },
+  pillTitle: {
+    fontWeight: 950,
+    fontSize: 12,
+    opacity: 0.85,
+  },
+  pillValue: {
+    fontWeight: 950,
+    fontSize: 26,
+    letterSpacing: -0.5,
+  },
+  pillIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    display: "grid",
+    placeItems: "center",
+    background: "rgba(0,0,0,0.10)",
+    color: "rgba(10, 12, 20, 0.65)",
+    flex: "0 0 auto",
+  },
+
+  quickPanel: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    marginTop: 2,
+  },
+  quickHeader: {
+    fontWeight: 950,
+    fontSize: 16,
+    paddingLeft: 2,
+  },
+  quickRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: 14,
+  },
+  quickBtn: {
+    height: 62,
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.14)",
+    textDecoration: "none",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    fontWeight: 950,
+    color: "rgba(255,255,255,0.96)",
+    boxShadow: "0 12px 28px rgba(0,0,0,0.28)",
+    transition: "transform 160ms ease, filter 160ms ease",
+  },
+  quickBtnIcon: {
+    display: "grid",
+    placeItems: "center",
+    opacity: 0.95,
+  },
+  btnBlue: {
+    background: "linear-gradient(135deg, rgba(59,130,246,0.65), rgba(15,23,42,0.35))",
+  },
+  btnGreen: {
+    background: "linear-gradient(135deg, rgba(16,185,129,0.55), rgba(15,23,42,0.35))",
+  },
+  btnPurple: {
+    background: "linear-gradient(135deg, rgba(168,85,247,0.55), rgba(15,23,42,0.35))",
+  },
+  btnOrange: {
+    background: "linear-gradient(135deg, rgba(245,158,11,0.65), rgba(15,23,42,0.35))",
+  },
+
+  about: {
+    borderRadius: 22,
+    padding: 18,
+    border: "1px solid rgba(255,255,255,0.12)",
+    marginTop: 4,
+  },
+  aboutTitle: {
+    margin: 0,
+    fontSize: 28,
+    fontWeight: 950,
+  },
+  aboutSubTitle: {
+    marginTop: 12,
+    fontWeight: 950,
+    opacity: 0.95,
+  },
+  aboutText: {
+    marginTop: 10,
+    marginBottom: 0,
+    opacity: 0.82,
+    lineHeight: 1.6,
+  },
+};

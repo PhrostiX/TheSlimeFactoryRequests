@@ -1,148 +1,246 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const DiscordIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 6, display: "inline-block", verticalAlign: "middle", flexShrink: 0 }}>
-    <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515a.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0a12.64 12.64 0 0 0-.617-1.25a.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057a19.9 19.9 0 0 0 5.993 3.03a.078.078 0 0 0 .084-.028a14.09 14.09 0 0 0 1.226-1.994a.076.076 0 0 0-.041-.106a13.107 13.107 0 0 1-1.872-.892a.077.077 0 0 1-.008-.128a10.2 10.2 0 0 0 .372-.292a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127a12.299 12.299 0 0 1-1.873.892a.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028a19.839 19.839 0 0 0 6.002-3.03a.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.956-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.955-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.946 2.418-2.157 2.418z"/>
-  </svg>
-);
+type Tab = {
+  name: string;
+  href: string;
+  external?: boolean;
+  isDiscord?: boolean;
+};
 
 export default function TabNav() {
   const pathname = usePathname();
 
-  const tabs = [
+  const tabs: Tab[] = [
     { name: "Home", href: "/" },
     { name: "Search", href: "/search" },
-    { name: "Latest Sends", href: "/latest-sends" },
-    { name: "Latest Submissions", href: "/latest-submissions" },
     { name: "About", href: "/about" },
-    { name: "Discord", href: "https://discord.gg/3Sctyn3ekP", isDiscord: true, external: true },
+    { name: "Contributors", href: "/contributors" },
+    {
+      name: "Discord",
+      href: "https://discord.gg/3Sctyn3ekP",
+      external: true,
+      isDiscord: true,
+    },
   ];
 
   return (
-    <nav style={styles.nav} className="frosted-glass animate-slide-in-up">
-      <div style={styles.container}>
-        <a href="/" style={styles.logo} className="logo-hover">
-          <span style={styles.logoText}>Level Requests DB</span>
-        </a>
-        <div style={styles.tabs}>
-          {tabs.map((tab, index) => {
-            const isActive = pathname === tab.href;
-            const isDiscord = tab.isDiscord;
+    <header className="tabNav" role="banner">
+      <div className="tabNavInner">
+        <Link href="/" className="brand">
+          Level Requests Database
+        </Link>
+
+        <nav className="navLinks" aria-label="Primary">
+          {tabs.map((t) => {
+            const isActive = !t.external && pathname === t.href;
+
+            if (t.external) {
+              return (
+                <a
+                  key={t.href}
+                  href={t.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={t.isDiscord ? "navDiscord" : "navLink"}
+                >
+                  {t.name}
+                </a>
+              );
+            }
+
             return (
-              <a
-                key={tab.href}
-                href={tab.href}
-                className={isDiscord ? "discord-btn" : "tab-hover"}
-                style={{
-                  ...styles.tab,
-                  ...(isDiscord ? styles.discordTab : {}),
-                  ...(isActive && !isDiscord ? styles.tabActive : {}),
-                  animationDelay: `${index * 0.1}s`,
-                }}
-                target={tab.external ? "_blank" : undefined}
-                rel={tab.external ? "noreferrer" : undefined}
+              <Link
+                key={t.href}
+                href={t.href}
+                className={`navLink ${isActive ? "active" : ""}`}
               >
-                {isDiscord && <DiscordIcon />}
-                {tab.name}
-              </a>
+                {t.name}
+              </Link>
             );
           })}
-        </div>
+        </nav>
       </div>
-      <style jsx>{`
-        .logo-hover {
-          transition: transform 300ms ease;
+
+      {/* IMPORTANT: global makes the animation actually apply */}
+      <style jsx global>{`
+        .tabNav {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          z-index: 50;
+          background: rgba(8, 10, 20, 0.72);
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+          backdrop-filter: blur(10px);
         }
-        .logo-hover:hover {
-          transform: scale(1.05);
+
+        .tabNavInner {
+          width: min(1200px, 100%);
+          margin: 0 auto;
+          padding: 12px 18px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 14px;
         }
-        .tab-hover {
-          animation: fadeIn 0.4s ease-out backwards;
+
+        .brand {
+          font-weight: 900;
+          letter-spacing: 0.2px;
+          text-decoration: none;
+          color: rgba(210, 230, 255, 0.95);
+          transition: transform 180ms ease, filter 180ms ease;
+          will-change: transform;
         }
-        .tab-hover:hover {
-          transform: translateY(-2px);
-          background: var(--glass-bg);
-          opacity: 1 !important;
+
+        .brand:hover {
+          transform: translateY(-1px);
+          filter: brightness(1.06);
         }
-        .discord-btn {
-          animation: fadeIn 0.4s ease-out backwards;
+
+        .navLinks {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
+          justify-content: flex-end;
         }
-        .discord-btn:hover {
-          transform: translateY(-2px) scale(1.02);
-          box-shadow: 0 6px 20px rgba(88, 101, 242, 0.4);
+
+        /* NEW ANIMATION */
+        .navLink {
+          position: relative;
+          text-decoration: none;
+          padding: 8px 12px;
+          border-radius: 999px;
+          color: rgba(255, 255, 255, 0.86);
+          font-weight: 850;
+          font-size: 13px;
+          border: 1px solid transparent;
+
+          transform: translateY(0) scale(1);
+          transition: transform 180ms ease, background 180ms ease,
+            border-color 180ms ease, color 180ms ease, filter 180ms ease,
+            box-shadow 180ms ease;
+          will-change: transform;
+        }
+
+        /* underline sweep */
+        .navLink::after {
+          content: "";
+          position: absolute;
+          left: 14px;
+          right: 14px;
+          bottom: 6px;
+          height: 2px;
+          border-radius: 999px;
+          background: linear-gradient(
+            90deg,
+            rgba(99, 102, 241, 0),
+            rgba(99, 102, 241, 0.95),
+            rgba(59, 130, 246, 0.95),
+            rgba(59, 130, 246, 0)
+          );
+          opacity: 0;
+          transform: translateY(8px) scaleX(0.3);
+          transition: opacity 220ms ease, transform 240ms ease;
+          pointer-events: none;
+        }
+
+        .navLink:hover {
+          transform: translateY(-3px) scale(1.03);
+          color: rgba(255, 255, 255, 0.98);
+          border-color: rgba(255, 255, 255, 0.14);
+          background: rgba(255, 255, 255, 0.07);
+          box-shadow: 0 14px 30px rgba(0, 0, 0, 0.25);
+        }
+
+        .navLink:hover::after {
+          opacity: 1;
+          transform: translateY(0px) scaleX(1);
+        }
+
+        /* click press */
+        .navLink:active {
+          transform: translateY(-1px) scale(0.98);
+        }
+
+        /* active tab pop animation */
+        .navLink.active {
+          background: rgba(255, 255, 255, 0.09);
+          border-color: rgba(255, 255, 255, 0.16);
+          color: rgba(255, 255, 255, 0.99);
+          box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+          animation: tabPop 40ms ease-out;
+        }
+
+        .navLink.active::after {
+          opacity: 1;
+          transform: translateY(0px) scaleX(1);
+        }
+
+        @keyframes tabPop {
+          0% {
+            transform: translateY(0) scale(0.98);
+          }
+          60% {
+            transform: translateY(-2px) scale(1.04);
+          }
+          100% {
+            transform: translateY(0) scale(1);
+          }
+        }
+
+        /* Discord button */
+        .navDiscord {
+          text-decoration: none;
+          padding: 9px 14px;
+          border-radius: 999px;
+          font-weight: 900;
+          font-size: 13px;
+          color: rgba(255, 255, 255, 0.96);
+          background: linear-gradient(
+            135deg,
+            rgba(99, 102, 241, 0.88),
+            rgba(59, 130, 246, 0.78)
+          );
+          border: 1px solid rgba(255, 255, 255, 0.16);
+
+          transform: translateY(0) scale(1);
+          transition: transform 180ms ease, filter 180ms ease,
+            box-shadow 180ms ease;
+          will-change: transform;
+        }
+
+        .navDiscord:hover {
+          transform: translateY(-3px) scale(1.03);
+          filter: brightness(1.06);
+          box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
+        }
+
+        .navDiscord:active {
+          transform: translateY(-1px) scale(0.99);
+        }
+
+        .navLink:focus-visible,
+        .navDiscord:focus-visible,
+        .brand:focus-visible {
+          outline: 2px solid rgba(99, 102, 241, 0.7);
+          outline-offset: 2px;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .navLink,
+          .navDiscord,
+          .brand,
+          .navLink::after {
+            transition: none !important;
+            animation: none !important;
+          }
         }
       `}</style>
-    </nav>
+    </header>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  nav: {
-    position: "fixed",
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 100,
-    borderBottom: "1px solid var(--glass-border)",
-  },
-  container: {
-    maxWidth: 1200,
-    margin: "0 auto",
-    padding: "16px 24px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 24,
-    flexWrap: "wrap",
-  },
-  logo: {
-    textDecoration: "none",
-    color: "var(--foreground)",
-    fontWeight: 700,
-    fontSize: 18,
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-  },
-  logoText: {
-    background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-light) 100%)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
-    backgroundClip: "text",
-  },
-  tabs: {
-    display: "flex",
-    gap: 8,
-    flexWrap: "wrap",
-  },
-  tab: {
-    padding: "8px 16px",
-    borderRadius: 10,
-    textDecoration: "none",
-    color: "var(--foreground)",
-    fontSize: 14,
-    fontWeight: 500,
-    transition: "all 200ms ease",
-    opacity: 0.7,
-    cursor: "pointer",
-  },
-  tabActive: {
-    background: "var(--glass-bg)",
-    opacity: 1,
-    fontWeight: 600,
-    boxShadow: "0 2px 8px var(--shadow-color)",
-  },
-  discordTab: {
-    background: "#5865F2",
-    color: "white",
-    opacity: 1,
-    fontWeight: 600,
-    display: "inline-flex",
-    alignItems: "center",
-    flexWrap: "nowrap",
-    whiteSpace: "nowrap",
-    boxShadow: "0 4px 12px rgba(88, 101, 242, 0.3)",
-  },
-};
