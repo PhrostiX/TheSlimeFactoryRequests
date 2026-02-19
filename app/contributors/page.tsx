@@ -16,7 +16,7 @@ const MOD_BADGE = "/modbadge.png";
 export default function ContributorsPage() {
   const coreTeam: Person[] = [
     { name: "PhrostiX", title: "Owner / Dev", badge: "dev" },
-    { name: "Koishi", title: "UI/UX / Dev )", badge: "dev" },
+    { name: "Koishi", title: "UI / Dev", badge: "dev" },
   ];
 
   const owners: Person[] = [{ name: "dkirinor", title: "Server Owner", badge: "dev" }];
