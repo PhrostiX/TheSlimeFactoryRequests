@@ -64,7 +64,6 @@ export default function TabNav() {
         </nav>
       </div>
 
-      {/* IMPORTANT: global makes the animation actually apply */}
       <style jsx global>{`
         .tabNav {
           position: fixed;

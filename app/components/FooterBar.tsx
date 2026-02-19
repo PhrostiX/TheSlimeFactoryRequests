@@ -8,7 +8,7 @@ export default function FooterBar() {
       <div className="inner">
         <div className="left">© {new Date().getFullYear()} PhrostiX — Built with Next.js &amp; TypeScript.</div>
         <div className="right" aria-label="Footer links">
-          {/* These are placeholders — swap hrefs/icons as you like */}
+          {/* These are placeholders — Note to KOISHI: they are temporarily removed*/}
         </div>
       </div>
 

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 
+//this is a legacy function
 export async function GET() {
   const url = process.env.PUBLIC_SHEET_CSV_URL;
-  const isPlaceholder = url === "your_google_sheets_csv_url_here";
+  const isPlaceholder = url === "google sheets_URL";
 
   return NextResponse.json({
     configured: !!url && !isPlaceholder,

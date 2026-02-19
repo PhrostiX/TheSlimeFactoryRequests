@@ -42,7 +42,7 @@ type MongoRequest = {
   levelInfo?: {
     name?: string | null;
     description?: string | null;
-    // difficulties[0] holds your "count" bucket:
+    // difficulties[0] holds "count" bucket:
     // - platformer=false: star count / difficulty bucket
     // - platformer=true: moon count / difficulty bucket
     // Demon tiers are 10..14 (10 easy demon ... 14 extreme demon)

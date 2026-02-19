@@ -16,10 +16,10 @@ const MOD_BADGE = "/modbadge.png";
 export default function ContributorsPage() {
   const coreTeam: Person[] = [
     { name: "PhrostiX", title: "Owner / Dev", badge: "dev" },
-    { name: "Koishi", title: "Dev / Automation", badge: "dev" },
+    { name: "Koishi", title: "UI / Bug fixing )", badge: "dev" },
   ];
 
-  const owners: Person[] = [{ name: "Dkirinor", title: "Server Owner", badge: "dev" }];
+  const owners: Person[] = [{ name: "dkirinor", title: "Server Owner", badge: "dev" }];
 
   const mods: Person[] = [
     { name: "YraX", title: "Moderator", badge: "mod" },
@@ -32,7 +32,6 @@ export default function ContributorsPage() {
 
       <main style={styles.page}>
         <section style={styles.container} className="frosted-glass-strong">
-          {/* HERO (logo centered like the other pages) */}
           <div style={styles.hero}>
             <Image
               src="/contributors.png"
@@ -147,8 +146,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 24,
     padding: "26px 26px 28px",
   },
-
-  // ✅ HERO: behaves like your other pages (centered, responsive, not “floating”)
+  
   hero: {
     display: "flex",
     justifyContent: "center",
