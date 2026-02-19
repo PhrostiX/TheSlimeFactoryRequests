@@ -22,12 +22,7 @@ export default function ContributorsPage() {
   const owners: Person[] = [{ name: "Dkirinor", title: "Server Owner", badge: "dev" }];
 
   const mods: Person[] = [
-    { name: "Perox8", title: "Moderator", badge: "mod" },
-    { name: "Infra", title: "Moderator", badge: "mod" },
-    { name: "Nexter", title: "Moderator", badge: "mod" },
     { name: "YraX", title: "Moderator", badge: "mod" },
-    { name: "Waffl3X", title: "Moderator", badge: "mod" },
-    { name: "Gusearth", title: "Moderator", badge: "mod" },
   ];
 
   return (
@@ -78,7 +73,7 @@ export default function ContributorsPage() {
               <div style={styles.modsCard} className="frosted-glass">
                 <div style={styles.modsTop}>
                   <div style={styles.modsTitle}>Mods</div>
-                  <div style={styles.modsSub}>Review / Sends (THESE ARE PLACEHOLDERS)</div>
+                  <div style={styles.modsSub}>Review / Sends</div>
                 </div>
 
                 <div style={styles.modsList}>
