@@ -24,6 +24,7 @@ export default function ContributorsPage() {
   const mods: Person[] = [
     { name: "YraX", title: "Moderator", badge: "mod" },
     { name: "Perox8", title: "Moderator", badge: "mod" },
+    { name: "Incidius", title: "Moderator", badge: "mod" },
   ];
 
   return (

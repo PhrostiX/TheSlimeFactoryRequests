@@ -62,6 +62,20 @@ function statusFromRequest(r: MongoRequest): TagKey {
   return "pending";
 }
 
+function isAccepted(r: MongoRequest): boolean {
+  // "Accepted" = has been sent at least once
+  if (typeof r.sendCount === "number" && r.sendCount > 0) return true;
+  if (Array.isArray(r.sends) && r.sends.length > 0) return true;
+
+  // fallback: some schemas mark "sending" via review types
+  const rev = latestReview(r);
+  if (!rev) return false;
+  const t = Number(rev.type);
+  if (t > 0) return true;
+  if (t === -2) return true;
+  return false;
+}
+
 export default function HomePage() {
   const [rows, setRows] = useState<MongoRequest[]>([]);
   const [loading, setLoading] = useState(false);
@@ -90,19 +104,23 @@ export default function HomePage() {
   const stats = useMemo(() => {
     let total = involved.length;
     let pending = 0;
-    let sent = 0;
+    let accepted = 0;
+    let sends = 0;
     let rated = 0;
     let rejected = 0;
 
     for (const r of involved) {
       const st = statusFromRequest(r);
+
       if (st === "pending") pending++;
-      else if (st === "sending") sent++;
-      else if (st === "rated") rated++;
-      else if (st === "rejected") rejected++;
+      if (st === "sending") sends++;
+      if (st === "rated") rated++;
+      if (st === "rejected") rejected++;
+
+      if (isAccepted(r)) accepted++;
     }
 
-    return { total, pending, sent, rated, rejected };
+    return { total, pending, accepted, sends, rated, rejected };
   }, [involved]);
 
   return (
@@ -136,10 +154,11 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="homePillRow" style={styles.pillRow}>
+            <div className="homePillRow" style={styles.pillRowSix}>
               <StatPill title="Total" value={loading ? "…" : stats.total} tone="total" icon="user" />
               <StatPill title="Pending" value={loading ? "…" : stats.pending} tone="pending" icon="clock" />
-              <StatPill title="Sent" value={loading ? "…" : stats.sent} tone="sent" icon="send" />
+              <StatPill title="Accepted" value={loading ? "…" : stats.sends} tone="accepted" icon="check" />
+              <StatPill title="Sends" value={loading ? "…" : stats.accepted} tone="sent" icon="rocket" />
               <StatPill title="Rated" value={loading ? "…" : stats.rated} tone="rated" icon="sad" />
               <StatPill title="Rejected" value={loading ? "…" : stats.rejected} tone="rejected" icon="x" />
             </div>
@@ -151,18 +170,8 @@ export default function HomePage() {
             <div className="homeQuickRow" style={styles.quickRow}>
               <ActionBtn href="/search" label="Search" tone="blue" icon="search" />
               <ActionBtn href="/search?preset=sends" label="Latest Sends" tone="green" icon="rocket" />
-              <ActionBtn
-                href="/search?preset=submissions"
-                label="Latest Submissions"
-                tone="purple"
-                icon="clock"
-              />
-              <ActionBtn
-                href="https://discord.gg/3Sctyn3ekP"
-                label="Send feedback"
-                tone="orange"
-                icon="mail"
-              />
+              <ActionBtn href="/search?preset=submissions" label="Latest Submissions" tone="purple" icon="clock" />
+              <ActionBtn href="https://discord.gg/3Sctyn3ekP" label="Send feedback" tone="orange" icon="mail" />
             </div>
           </section>
 
@@ -170,11 +179,13 @@ export default function HomePage() {
           <section style={styles.about} className="frosted-glass-strong">
             <h2 style={styles.aboutTitle}>How do I submit a level?</h2>
             <p style={styles.aboutText}>
-              Please join our discord and use the slime requester bot. You may request your level any time — the requests do not close — but be aware that the bot is in beta and might have issues.
+              Please join our discord and use the slime requester bot. You may request your level any time — the
+              requests do not close — but be aware that the bot is in beta and might have issues.
             </p>
             <div style={styles.aboutSubTitle}>How it works</div>
             <p style={styles.aboutText}>
-              Request with your level ID and a video link (if required). We will ping you when we work with your level, including sends, rejects, and status changes.
+              Request with your level ID and a video link (if required). We will ping you when we work with your level,
+              including sends, rejects, and status changes.
             </p>
           </section>
         </div>
@@ -191,13 +202,12 @@ function StatPill({
 }: {
   title: string;
   value: React.ReactNode;
-  tone: "total" | "pending" | "sent" | "rated" | "rejected";
+  tone: "total" | "pending" | "accepted" | "sent" | "rated" | "rejected";
   icon: IconName;
 }) {
   return (
     <div style={{ ...styles.pill, ...(toneStyles[tone] || {}) }}>
-      <div style={styles.pillLeft}
-      >
+      <div style={styles.pillLeft}>
         <div style={styles.pillTitle}>{title}</div>
         <div style={styles.pillValue}>{value}</div>
       </div>
@@ -208,15 +218,7 @@ function StatPill({
   );
 }
 
-type IconName =
-  | "user"
-  | "clock"
-  | "send"
-  | "sad"
-  | "x"
-  | "search"
-  | "rocket"
-  | "mail";
+type IconName = "user" | "clock" | "send" | "sad" | "x" | "search" | "rocket" | "mail" | "check";
 
 function Icon({ name }: { name: IconName }) {
   const common = {
@@ -230,12 +232,7 @@ function Icon({ name }: { name: IconName }) {
   if (name === "user") {
     return (
       <svg {...common}>
-        <path
-          d="M20 21a8 8 0 0 0-16 0"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
+        <path d="M20 21a8 8 0 0 0-16 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         <path
           d="M12 13a4 4 0 1 0-4-4 4 4 0 0 0 4 4Z"
           stroke="currentColor"
@@ -249,11 +246,7 @@ function Icon({ name }: { name: IconName }) {
   if (name === "clock") {
     return (
       <svg {...common}>
-        <path
-          d="M12 22a10 10 0 1 0-10-10 10 10 0 0 0 10 10Z"
-          stroke="currentColor"
-          strokeWidth="2"
-        />
+        <path d="M12 22a10 10 0 1 0-10-10 10 10 0 0 0 10 10Z" stroke="currentColor" strokeWidth="2" />
         <path
           d="M12 6v6l4 2"
           stroke="currentColor"
@@ -286,52 +279,24 @@ function Icon({ name }: { name: IconName }) {
   if (name === "sad") {
     return (
       <svg {...common}>
-        <path
-          d="M12 22a10 10 0 1 0-10-10 10 10 0 0 0 10 10Z"
-          stroke="currentColor"
-          strokeWidth="2"
-        />
-        <path
-          d="M8.5 9.5h.01M15.5 9.5h.01"
-          stroke="currentColor"
-          strokeWidth="3"
-          strokeLinecap="round"
-        />
-        <path
-          d="M16 16a4.5 4.5 0 0 0-8 0"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
+        <path d="M12 22a10 10 0 1 0-10-10 10 10 0 0 0 10 10Z" stroke="currentColor" strokeWidth="2" />
+        <path d="M8.5 9.5h.01M15.5 9.5h.01" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+        <path d="M16 16a4.5 4.5 0 0 0-8 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
       </svg>
     );
   }
   if (name === "x") {
     return (
       <svg {...common}>
-        <path
-          d="M18 6 6 18M6 6l12 12"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
+        <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
       </svg>
     );
   }
   if (name === "search") {
     return (
       <svg {...common}>
-        <path
-          d="M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16Z"
-          stroke="currentColor"
-          strokeWidth="2"
-        />
-        <path
-          d="M21 21l-4.35-4.35"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
+        <path d="M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16Z" stroke="currentColor" strokeWidth="2" />
+        <path d="M21 21l-4.35-4.35" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
       </svg>
     );
   }
@@ -344,18 +309,8 @@ function Icon({ name }: { name: IconName }) {
           strokeWidth="2"
           strokeLinejoin="round"
         />
-        <path
-          d="M10 14 8 12"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-        <path
-          d="M13 7h0"
-          stroke="currentColor"
-          strokeWidth="4"
-          strokeLinecap="round"
-        />
+        <path d="M10 14 8 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        <path d="M13 7h0" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
         <path
           d="M6.5 19.5 4 20l.5-2.5L7 15l2 2-2.5 2.5Z"
           stroke="currentColor"
@@ -365,15 +320,23 @@ function Icon({ name }: { name: IconName }) {
       </svg>
     );
   }
+  if (name === "check") {
+    return (
+      <svg {...common}>
+        <path
+          d="M20 6 9 17l-5-5"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
   // mail
   return (
     <svg {...common}>
-      <path
-        d="M4 6h16v12H4V6Z"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
+      <path d="M4 6h16v12H4V6Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
       <path
         d="m4 8 8 6 8-6"
         stroke="currentColor"
@@ -417,34 +380,28 @@ function ActionBtn({
 
 const toneStyles: Record<string, React.CSSProperties> = {
   total: {
-    background:
-      "linear-gradient(135deg, rgba(147, 255, 68, 0.95), rgba(26, 200, 92, 0.60))",
-    boxShadow:
-      "0 10px 24px rgba(34,197,94,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
+    background: "linear-gradient(135deg, rgba(147, 255, 68, 0.95), rgba(26, 200, 92, 0.60))",
+    boxShadow: "0 10px 24px rgba(34,197,94,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
   },
   pending: {
-    background:
-      "linear-gradient(135deg, rgba(255, 208, 64, 0.95), rgba(235, 176, 36, 0.62))",
-    boxShadow:
-      "0 10px 24px rgba(245,158,11,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
+    background: "linear-gradient(135deg, rgba(255, 208, 64, 0.95), rgba(235, 176, 36, 0.62))",
+    boxShadow: "0 10px 24px rgba(245,158,11,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
+  },
+  accepted: {
+    background: "linear-gradient(135deg, rgba(34,197,94,0.92), rgba(16,185,129,0.60))",
+    boxShadow: "0 10px 24px rgba(16,185,129,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
   },
   sent: {
-    background:
-      "linear-gradient(135deg, rgba(55, 230, 255, 0.95), rgba(56, 189, 248, 0.60))",
-    boxShadow:
-      "0 10px 24px rgba(56,189,248,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
+    background: "linear-gradient(135deg, rgba(55, 230, 255, 0.95), rgba(56, 189, 248, 0.60))",
+    boxShadow: "0 10px 24px rgba(56,189,248,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
   },
   rated: {
-    background:
-      "linear-gradient(135deg, rgba(255, 90, 220, 0.95), rgba(217, 70, 239, 0.58))",
-    boxShadow:
-      "0 10px 24px rgba(217,70,239,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
+    background: "linear-gradient(135deg, rgba(255, 90, 220, 0.95), rgba(217, 70, 239, 0.58))",
+    boxShadow: "0 10px 24px rgba(217,70,239,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
   },
   rejected: {
-    background:
-      "linear-gradient(135deg, rgba(255, 85, 85, 0.92), rgba(239, 68, 68, 0.55))",
-    boxShadow:
-      "0 10px 24px rgba(239,68,68,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
+    background: "linear-gradient(135deg, rgba(255, 85, 85, 0.92), rgba(239, 68, 68, 0.55))",
+    boxShadow: "0 10px 24px rgba(239,68,68,0.18), inset 0 0 0 1px rgba(0,0,0,0.18)",
   },
 };
 
@@ -515,9 +472,9 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 0.55,
   },
 
-  pillRow: {
+  pillRowSix: {
     display: "grid",
-    gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
     gap: 12,
   },
   pill: {
