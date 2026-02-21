@@ -5,11 +5,23 @@ import "../../../../../server-dns";
 import { NextResponse, type NextRequest } from "next/server";
 import crypto from "crypto";
 import { cookies } from "next/headers";
-import { ObjectId } from "mongodb";
 import { getMongoClient } from "@/lib/mongo";
 import { MOD_PROFILES } from "@/app/lib/adminProfiles";
 
 type Rating = "rate" | "feature" | "epic" | "legendary" | "mythic";
+
+/**
+ * IMPORTANT:
+ * Your Mongo documents use numeric _id (example: _id: 64)
+ * So we explicitly type the collection correctly.
+ */
+type RequestDoc = {
+  _id: number;
+  sendCount?: number;
+  reviews?: { sendCount?: number };
+  sends?: any[];
+  sync?: any;
+};
 
 function sign(value: string, secret: string) {
   return crypto.createHmac("sha256", secret).update(value).digest("hex");
@@ -39,14 +51,29 @@ function normalizeRating(raw: unknown): Rating | null {
   return null;
 }
 
-export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+export async function POST(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> }
+) {
   try {
     const { id } = await ctx.params;
+
+    // ✅ Your Mongo _id is numeric
+    const _id = Number(id);
+    if (!Number.isFinite(_id)) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid id" },
+        { status: 400 }
+      );
+    }
 
     const body = await req.json().catch(() => ({}));
     const rating = normalizeRating((body as any)?.rating);
     if (!rating) {
-      return NextResponse.json({ ok: false, error: "Invalid rating" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Invalid rating" },
+        { status: 400 }
+      );
     }
 
     const commentRaw = (body as any)?.comment;
@@ -57,18 +84,27 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
     const SESSION_SECRET = process.env.SESSION_SECRET;
     if (!SESSION_SECRET) {
-      return NextResponse.json({ ok: false, error: "Missing SESSION_SECRET" }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, error: "Missing SESSION_SECRET" },
+        { status: 500 }
+      );
     }
 
     const store = await cookies();
     const token = store.get("admin_session")?.value;
     if (!isValidSession(token, SESSION_SECRET)) {
-      return NextResponse.json({ ok: false, error: "Not authorized" }, { status: 401 });
+      return NextResponse.json(
+        { ok: false, error: "Not authorized" },
+        { status: 401 }
+      );
     }
 
     const profile = store.get("admin_profile")?.value ?? null;
     if (!profile || !MOD_PROFILES.includes(profile as any)) {
-      return NextResponse.json({ ok: false, error: "Missing admin profile" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Missing admin profile" },
+        { status: 400 }
+      );
     }
 
     const sendId = crypto.randomUUID();
@@ -76,14 +112,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
     const client = await getMongoClient();
     const db = client.db(process.env.MONGODB_DB);
-    const col = db.collection("requests");
-
-    let _id: ObjectId;
-    try {
-      _id = new ObjectId(id);
-    } catch {
-      return NextResponse.json({ ok: false, error: "Invalid id" }, { status: 400 });
-    }
+    const col = db.collection<RequestDoc>("requests");
 
     const update = {
       $inc: {
@@ -109,13 +138,20 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     };
 
     const result = await col.updateOne({ _id }, update as any);
+
     if (result.matchedCount === 0) {
-      return NextResponse.json({ ok: false, error: "Request not found" }, { status: 404 });
+      return NextResponse.json(
+        { ok: false, error: "Request not found" },
+        { status: 404 }
+      );
     }
 
     return NextResponse.json({ ok: true, sendId });
   } catch (e: any) {
     console.error("POST /api/requests/[id]/send error:", e);
-    return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: String(e?.message ?? e) },
+      { status: 500 }
+    );
   }
 }
