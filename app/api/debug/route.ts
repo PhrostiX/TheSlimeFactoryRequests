@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-//this is a legacy function
+//this is a legacdy function
 export async function GET() {
   const url = process.env.PUBLIC_SHEET_CSV_URL;
   const isPlaceholder = url === "google sheets_URL";
