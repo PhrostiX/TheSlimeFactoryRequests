@@ -217,20 +217,19 @@ function allReviews(r: MongoRequest): Review[] {
 
 function statusFromRequest(r: MongoRequest): { key: TagKey; text: string } {
   const s = (r.status || "").toLowerCase();
+
+  // ✅ Explicit status always wins (do NOT override rejected just because it has sends)
+  if (s === "pending") return { key: "pending", text: "Pending Review" };
   if (s === "sending") return { key: "sending", text: "Accepted" };
   if (s === "rated") return { key: "rated", text: "★ Rated" };
   if (s === "rejected") return { key: "rejected", text: "Not Accepted" };
   if (s === "stolen") return { key: "stolen", text: "Stolen" };
   if (s === "dne") return { key: "dne", text: "Does not exist" };
-  if (s === "pending") return { key: "pending", text: "Pending Review" };
 
-  if (typeof r.sendCount === "number" && r.sendCount > 0)
-    return { key: "sending", text: "Accepted" };
-  if (Array.isArray(r.sends) && r.sends.length > 0)
-    return { key: "sending", text: "Accepted" };
-
+  // ✅ Fallback for legacy data (ONLY when status is missing)
   const rev = latestReview(r);
   if (!rev) return { key: "pending", text: "Pending Review" };
+
   const t = Number(rev.type);
   if (t > 0) return { key: "sending", text: "Accepted" };
   if (t === -1) return { key: "rejected", text: "Not Accepted" };
@@ -238,6 +237,7 @@ function statusFromRequest(r: MongoRequest): { key: TagKey; text: string } {
   if (t === -3) return { key: "rated", text: "★ Rated" };
   if (t === -4) return { key: "stolen", text: "Stolen" };
   if (t === -5) return { key: "dne", text: "Does not exist" };
+
   return { key: "pending", text: "Pending Review" };
 }
 
@@ -255,19 +255,20 @@ function totalSends(r: MongoRequest) {
 }
 
 function lastSendMs(r: MongoRequest): number | null {
-  const st = statusFromRequest(r);
-  if (st.key !== "sending") return null;
-
+  // ✅ Always return last send if one exists — regardless of status
   if (Array.isArray(r.sends) && r.sends.length) {
     const sorted = [...r.sends].sort((a, b) => (b.date ?? 0) - (a.date ?? 0));
     return sorted[0]?.date ?? null;
   }
 
+  // Legacy review fallback (positive or -2 types mean "send")
   const revs = allReviews(r).filter((rv) => {
     const t = Number(rv.type);
     return t > 0 || t === -2;
   });
+
   if (!revs.length) return null;
+
   revs.sort((a, b) => (b.date ?? 0) - (a.date ?? 0));
   return revs[0]?.date ?? null;
 }
@@ -585,7 +586,7 @@ function RequestCard({ r, showLogSend, onLogSend }: { r: MongoRequest; showLogSe
 
   const bannerText = getRandomBannerText(id);
 
-  const showSendsInfo = tag === "sending" || tag === "rated";
+  const showSendsInfo = totalSends(r) > 0 || tag === "rated";
 
   return (
     <div style={styles.cardMega} className="requestCard">
@@ -721,65 +722,65 @@ export default function SearchPage() {
 
   const [admin, setAdmin] = useState<AdminState>({ isAdmin: false, profile: null });
 
-useEffect(() => {
-  fetch("/api/admin/me", { cache: "no-store" })
-    .then((r) => r.json())
-    .then((d: AdminState) => setAdmin(d))
-    .catch(() => {});
-}, []);
+  useEffect(() => {
+    fetch("/api/admin/me", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: AdminState) => setAdmin(d))
+      .catch(() => { });
+  }, []);
 
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
 
-const RATINGS = ["send-only", "feature", "epic", "legendary", "mythic"] as const;
-type Rating = (typeof RATINGS)[number];
+  const RATINGS = ["send-only", "feature", "epic", "legendary", "mythic"] as const;
+  type Rating = (typeof RATINGS)[number];
 
-function ratingLabel(r: Rating): string {
-  if (r === "send-only") return "Rate";
-  return r.charAt(0).toUpperCase() + r.slice(1);
-}
-
-const [sendModalOpen, setSendModalOpen] = useState(false);
-const [sendRating, setSendRating] = useState<Rating>("send-only");
-const [sendTargetId, setSendTargetId] = useState<string | null>(null);
-const [sendComment, setSendComment] = useState<string>("");
-const [sendSubmitting, setSendSubmitting] = useState(false);
-const [sendError, setSendError] = useState<string | null>(null);
-
-function openSendModal(requestId: string) {
-  setSendTargetId(requestId);
-  setSendRating("send-only");
-  setSendComment("");
-  setSendError(null);
-  setSendModalOpen(true);
-}
-
-async function submitSend() {
-  if (!sendTargetId) return;
-  setSendSubmitting(true);
-  setSendError(null);
-  try {
-    const res = await fetch(`/api/requests/${encodeURIComponent(sendTargetId)}/send`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rating: sendRating, comment: sendComment }),
-    });
-
-    const data = await res.json().catch(() => ({} as any));
-    if (!res.ok || data?.ok === false) {
-      setSendError(data?.error || "Failed to log send.");
-      return;
-    }
-
-    setSendModalOpen(false);
-    // Refresh list so the updated send count appears.
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
-    await fetchRows();
-  } catch (e: any) {
-    setSendError(String(e?.message ?? e));
-  } finally {
-    setSendSubmitting(false);
+  function ratingLabel(r: Rating): string {
+    if (r === "send-only") return "Rate";
+    return r.charAt(0).toUpperCase() + r.slice(1);
   }
-}
+
+  const [sendModalOpen, setSendModalOpen] = useState(false);
+  const [sendRating, setSendRating] = useState<Rating>("send-only");
+  const [sendTargetId, setSendTargetId] = useState<string | null>(null);
+  const [sendComment, setSendComment] = useState<string>("");
+  const [sendSubmitting, setSendSubmitting] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+
+  function openSendModal(requestId: string) {
+    setSendTargetId(requestId);
+    setSendRating("send-only");
+    setSendComment("");
+    setSendError(null);
+    setSendModalOpen(true);
+  }
+
+  async function submitSend() {
+    if (!sendTargetId) return;
+    setSendSubmitting(true);
+    setSendError(null);
+    try {
+      const res = await fetch(`/api/requests/${encodeURIComponent(sendTargetId)}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating: sendRating, comment: sendComment }),
+      });
+
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || data?.ok === false) {
+        setSendError(data?.error || "Failed to log send.");
+        return;
+      }
+
+      setSendModalOpen(false);
+      // Refresh list so the updated send count appears.
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
+      await fetchRows();
+    } catch (e: any) {
+      setSendError(String(e?.message ?? e));
+    } finally {
+      setSendSubmitting(false);
+    }
+  }
   const [showFilters, setShowFilters] = useState(false);
 
   // Preset shortcuts (used by the Home page buttons and legacy routes)
@@ -790,7 +791,12 @@ async function submitSend() {
     if (!preset) return;
 
     if (preset === "sends") {
-      setFilters({ ...DEFAULT_FILTERS, tags: ["sending"], sort: "lastsend_desc" });
+      // ✅ Do NOT filter by status.
+      // Show anything that has a send.
+      setFilters({
+        ...DEFAULT_FILTERS,
+        sort: "lastsend_desc",
+      });
       setShowFilters(false);
       return;
     }
@@ -832,13 +838,34 @@ async function submitSend() {
     setCurrentPage(1);
   }, [filters]);
 
-  const involvedRows = useMemo(() => rows.filter(isInvolvedMongo), [rows]);
-
+  // ✅ Search page should search ALL rows, not only "involved" ones
+  // (Filtering by checkFilter was causing legit requests to never appear in search)
   const computed = useMemo(() => {
-    return involvedRows.map((r) => {
+    return rows.map((r) => {
       const id = safeStr(r.levelId);
+      const subId = safeStr(r._id); // ✅ request id (mongo)
       const levelName = safeStr(r.levelInfo?.name);
       const uploaderName = safeStr(r.levelInfo?.uploader?.name);
+
+      // ✅ include more searchable fields
+      const desc = safeStr(r.levelInfo?.description);
+      const note = safeStr(r.levelInfo?.note);
+      const extra = safeStr(r.levelInfo?.extraQuestion);
+
+      // ✅ one combined blob for fast search (lowercased once)
+      const searchBlob = [
+        id,
+        subId,
+        levelName,
+        uploaderName,
+        desc,
+        note,
+        extra,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
       const requestedMs = toTimeMs(r.createdAt);
       const tag = statusFromRequest(r).key;
       const sends = totalSends(r);
@@ -852,6 +879,7 @@ async function submitSend() {
       return {
         r,
         id,
+        subId,
         levelName,
         uploaderName,
         requestedMs,
@@ -864,9 +892,10 @@ async function submitSend() {
         platformer,
         hasVideo,
         helperRating,
+        searchBlob,
       };
     });
-  }, [involvedRows]);
+  }, [rows]);
 
   const filtered = useMemo(() => {
     const text = filters.text.trim().toLowerCase();
@@ -1154,114 +1183,114 @@ async function submitSend() {
             </div>
           )}
         </div>
-      
-{sendModalOpen && (
-  <div
-    onClick={() => setSendModalOpen(false)}
-    style={{
-      position: "fixed",
-      inset: 0,
-      zIndex: 10000,
-      background: "rgba(0,0,0,0.6)",
-      display: "grid",
-      placeItems: "center",
-      padding: 16,
-    }}
-  >
-    <div
-      onClick={(e) => e.stopPropagation()}
-      style={{
-        width: "min(520px, 100%)",
-        borderRadius: 16,
-        padding: 16,
-        background: "rgba(20,20,20,0.95)",
-        border: "1px solid rgba(255,255,255,0.12)",
-        boxShadow: "0 12px 40px rgba(0,0,0,0.45)",
-      }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>Log Send</h3>
-        <button onClick={() => setSendModalOpen(false)} style={{ opacity: 0.8 }}>
-          ✕
-        </button>
-      </div>
 
-      <p style={{ opacity: 0.8, marginTop: 10 }}>
-        Moderator: <b>{admin.profile ?? "—"}</b>
-      </p>
+        {sendModalOpen && (
+          <div
+            onClick={() => setSendModalOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 10000,
+              background: "rgba(0,0,0,0.6)",
+              display: "grid",
+              placeItems: "center",
+              padding: 16,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "min(520px, 100%)",
+                borderRadius: 16,
+                padding: 16,
+                background: "rgba(20,20,20,0.95)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                boxShadow: "0 12px 40px rgba(0,0,0,0.45)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>Log Send</h3>
+                <button onClick={() => setSendModalOpen(false)} style={{ opacity: 0.8 }}>
+                  ✕
+                </button>
+              </div>
 
-      <label style={{ display: "block", marginTop: 10, opacity: 0.85 }}>
-        Select rating
-      </label>
-      <select
-        value={sendRating}
-        onChange={(e) => setSendRating(e.target.value as any)}
-        style={{
-          width: "100%",
-          padding: 10,
-          borderRadius: 12,
-          marginTop: 8,
-          background: "rgba(255,255,255,0.08)",
-          border: "1px solid rgba(255,255,255,0.14)",
-          color: "white",
-          outline: "none",
-        }}
-      >
-        {RATINGS.map((r) => (
-          <option key={r} value={r}>
-            {ratingLabel(r)}
-          </option>
-        ))}
-      </select>
+              <p style={{ opacity: 0.8, marginTop: 10 }}>
+                Moderator: <b>{admin.profile ?? "—"}</b>
+              </p>
 
-      <label style={{ display: "block", marginTop: 12, opacity: 0.85 }}>
-        Send comment (optional)
-      </label>
-      <textarea
-        value={sendComment}
-        onChange={(e) => setSendComment(e.target.value)}
-        placeholder="Add a short note to include in the #sends message (optional)"
-        rows={3}
-        style={{
-          width: "100%",
-          padding: 10,
-          borderRadius: 12,
-          marginTop: 8,
-          background: "rgba(255,255,255,0.08)",
-          border: "1px solid rgba(255,255,255,0.14)",
-          color: "white",
-          outline: "none",
-          resize: "vertical",
-        }}
-      />
+              <label style={{ display: "block", marginTop: 10, opacity: 0.85 }}>
+                Select rating
+              </label>
+              <select
+                value={sendRating}
+                onChange={(e) => setSendRating(e.target.value as any)}
+                style={{
+                  width: "100%",
+                  padding: 10,
+                  borderRadius: 12,
+                  marginTop: 8,
+                  background: "rgba(255,255,255,0.08)",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  color: "white",
+                  outline: "none",
+                }}
+              >
+                {RATINGS.map((r) => (
+                  <option key={r} value={r}>
+                    {ratingLabel(r)}
+                  </option>
+                ))}
+              </select>
 
-      <button
-        onClick={submitSend}
-        disabled={sendSubmitting}
-        style={{
-          marginTop: 12,
-          padding: "10px 12px",
-          borderRadius: 12,
-          fontWeight: 900,
-          background: "rgba(255,255,255,0.14)",
-          border: "1px solid rgba(255,255,255,0.18)",
-          color: "white",
-          cursor: "pointer",
-          opacity: sendSubmitting ? 0.7 : 1,
-        }}
-      >
-        {sendSubmitting ? "Submitting…" : "Submit"}
-      </button>
+              <label style={{ display: "block", marginTop: 12, opacity: 0.85 }}>
+                Send comment (optional)
+              </label>
+              <textarea
+                value={sendComment}
+                onChange={(e) => setSendComment(e.target.value)}
+                placeholder="Add a short note to include in the #sends message (optional)"
+                rows={3}
+                style={{
+                  width: "100%",
+                  padding: 10,
+                  borderRadius: 12,
+                  marginTop: 8,
+                  background: "rgba(255,255,255,0.08)",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  color: "white",
+                  outline: "none",
+                  resize: "vertical",
+                }}
+              />
 
-      {sendError && (
-        <p style={{ marginTop: 10, color: "tomato", fontWeight: 700 }}>
-          {sendError}
-        </p>
-      )}
-    </div>
-  </div>
-)}
-</main>
+              <button
+                onClick={submitSend}
+                disabled={sendSubmitting}
+                style={{
+                  marginTop: 12,
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  fontWeight: 900,
+                  background: "rgba(255,255,255,0.14)",
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  color: "white",
+                  cursor: "pointer",
+                  opacity: sendSubmitting ? 0.7 : 1,
+                }}
+              >
+                {sendSubmitting ? "Submitting…" : "Submit"}
+              </button>
+
+              {sendError && (
+                <p style={{ marginTop: 10, color: "tomato", fontWeight: 700 }}>
+                  {sendError}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </main>
 
       <style jsx>{`
         .requestCard {
