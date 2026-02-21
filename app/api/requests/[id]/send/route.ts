@@ -5,6 +5,7 @@ import "../../../../../server-dns";
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { cookies } from "next/headers";
+import { ObjectId } from "mongodb";
 import { getMongoClient } from "@/lib/mongo";
 import { MOD_PROFILES } from "@/app/lib/adminProfiles";
 
@@ -38,13 +39,20 @@ function normalizeRating(raw: unknown): Rating | null {
   return null;
 }
 
-export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function POST(
+  req: Request,
+  ctx: { params: { id: string } }
+) {
   try {
-    const { id } = await ctx.params;
+    const { id } = ctx.params;
+
     const body = await req.json().catch(() => ({}));
     const rating = normalizeRating((body as any)?.rating);
     if (!rating) {
-      return NextResponse.json({ ok: false, error: "Invalid rating" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Invalid rating" },
+        { status: 400 }
+      );
     }
 
     const commentRaw = (body as any)?.comment;
@@ -55,18 +63,27 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
     const SESSION_SECRET = process.env.SESSION_SECRET;
     if (!SESSION_SECRET) {
-      return NextResponse.json({ ok: false, error: "Missing SESSION_SECRET" }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, error: "Missing SESSION_SECRET" },
+        { status: 500 }
+      );
     }
 
     const store = await cookies();
     const token = store.get("admin_session")?.value;
     if (!isValidSession(token, SESSION_SECRET)) {
-      return NextResponse.json({ ok: false, error: "Not authorized" }, { status: 401 });
+      return NextResponse.json(
+        { ok: false, error: "Not authorized" },
+        { status: 401 }
+      );
     }
 
     const profile = store.get("admin_profile")?.value ?? null;
     if (!profile || !MOD_PROFILES.includes(profile as any)) {
-      return NextResponse.json({ ok: false, error: "Missing admin profile" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Missing admin profile" },
+        { status: 400 }
+      );
     }
 
     const sendId = crypto.randomUUID();
@@ -76,9 +93,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const db = client.db(process.env.MONGODB_DB);
     const col = db.collection("requests");
 
+    // Convert string id → Mongo ObjectId
+    let _id: ObjectId;
+    try {
+      _id = new ObjectId(id);
+    } catch {
+      return NextResponse.json(
+        { ok: false, error: "Invalid id" },
+        { status: 400 }
+      );
+    }
+
     const update = {
       $inc: {
-        // New + legacy counters (safe for now)
         sendCount: 1,
         "reviews.sendCount": 1,
       },
@@ -86,7 +113,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         sends: {
           id: sendId,
           type: rating,
-          by: profile, // plain text (e.g., Incidius)
+          by: profile,
           source: "website",
           date: now,
           comment: comment,
@@ -100,14 +127,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       },
     };
 
-    const result = await col.updateOne({ _id: Number(id) }, update as any);
+    const result = await col.updateOne({ _id }, update as any);
+
     if (result.matchedCount === 0) {
-      return NextResponse.json({ ok: false, error: "Request not found" }, { status: 404 });
+      return NextResponse.json(
+        { ok: false, error: "Request not found" },
+        { status: 404 }
+      );
     }
 
     return NextResponse.json({ ok: true, sendId });
   } catch (e: any) {
     console.error("POST /api/requests/[id]/send error:", e);
-    return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: String(e?.message ?? e) },
+      { status: 500 }
+    );
   }
 }
