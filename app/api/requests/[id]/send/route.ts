@@ -2,7 +2,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import "../../../../../server-dns";
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import crypto from "crypto";
 import { cookies } from "next/headers";
 import { ObjectId } from "mongodb";
@@ -39,9 +39,9 @@ function normalizeRating(raw: unknown): Rating | null {
   return null;
 }
 
-export async function POST(req: Request, ctx: { params: { id: string } }) {
+export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = ctx.params;
+    const { id } = await ctx.params;
 
     const body = await req.json().catch(() => ({}));
     const rating = normalizeRating((body as any)?.rating);
@@ -78,7 +78,6 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     const db = client.db(process.env.MONGODB_DB);
     const col = db.collection("requests");
 
-    // ✅ Mongo uses ObjectId for _id
     let _id: ObjectId;
     try {
       _id = new ObjectId(id);
