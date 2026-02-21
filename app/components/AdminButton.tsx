@@ -12,7 +12,7 @@ export default function AdminButton() {
   const [open, setOpen] = useState(false);
   const [admin, setAdmin] = useState<AdminState>({ isAdmin: false, profile: null });
   const [password, setPassword] = useState("");
-  const [selectedProfile, setSelectedProfile] = useState(MOD_PROFILES[0]);
+  const [selectedProfile, setSelectedProfile] = useState<string>(MOD_PROFILES[0]);
   const [error, setError] = useState<string | null>(null);
 
   const badgeSrc = "/modbadge.png";
