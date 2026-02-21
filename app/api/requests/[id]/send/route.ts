@@ -5,6 +5,7 @@ import "../../../../../server-dns";
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { cookies } from "next/headers";
+import { ObjectId } from "mongodb";
 import { getMongoClient } from "@/lib/mongo";
 import { MOD_PROFILES } from "@/app/lib/adminProfiles";
 
@@ -38,9 +39,10 @@ function normalizeRating(raw: unknown): Rating | null {
   return null;
 }
 
-export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function POST(req: Request, ctx: { params: { id: string } }) {
   try {
-    const { id } = await ctx.params;
+    const { id } = ctx.params;
+
     const body = await req.json().catch(() => ({}));
     const rating = normalizeRating((body as any)?.rating);
     if (!rating) {
@@ -76,9 +78,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const db = client.db(process.env.MONGODB_DB);
     const col = db.collection("requests");
 
+    // ✅ Mongo uses ObjectId for _id
+    let _id: ObjectId;
+    try {
+      _id = new ObjectId(id);
+    } catch {
+      return NextResponse.json({ ok: false, error: "Invalid id" }, { status: 400 });
+    }
+
     const update = {
       $inc: {
-        // New + legacy counters (safe for now)
         sendCount: 1,
         "reviews.sendCount": 1,
       },
@@ -86,7 +95,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         sends: {
           id: sendId,
           type: rating,
-          by: profile, // plain text (e.g., Incidius)
+          by: profile,
           source: "website",
           date: now,
           comment: comment,
@@ -100,7 +109,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       },
     };
 
-    const result = await col.updateOne({ _id: Number(id) }, update as any);
+    const result = await col.updateOne({ _id }, update as any);
     if (result.matchedCount === 0) {
       return NextResponse.json({ ok: false, error: "Request not found" }, { status: 404 });
     }
