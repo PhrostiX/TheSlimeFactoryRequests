@@ -141,7 +141,7 @@ export default function HomePage() {
               }}
             />
           </div>
-          <div style={styles.subtitle}>Geometry Dash Level Request Tracker</div>
+          <div style={{ ...styles.subtitle, paddingBottom: 10 }}>Geometry Dash Level Request Tracker</div>
 
           {/* Global Stats bar */}
           <section style={styles.statsPanel} className="frosted-glass-strong slimePanel">
@@ -429,10 +429,11 @@ const styles: Record<string, React.CSSProperties> = {
   logoWrap: {
     display: "flex",
     justifyContent: "center",
-    paddingTop: 10,
+    marginTop: -60,
+    marginLeft: -20,
   },
   logo: {
-    width: "min(560px, 95%)",
+    width: "min(1260px, 200%)",
     height: "auto",
     filter: "drop-shadow(0 18px 40px rgba(0,0,0,0.45))",
   },
