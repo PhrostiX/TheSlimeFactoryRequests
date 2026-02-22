@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { MOD_PROFILES } from "@/lib/adminProfiles";
 
 type AdminState = {
@@ -11,6 +12,7 @@ type AdminState = {
 export default function AdminButton() {
   const [open, setOpen] = useState(false);
   const [admin, setAdmin] = useState<AdminState>({ isAdmin: false, profile: null });
+  const [mounted, setMounted] = useState(false);
   const [password, setPassword] = useState("");
   const [selectedProfile, setSelectedProfile] = useState<string>(MOD_PROFILES[0]);
   const [error, setError] = useState<string | null>(null);
@@ -25,6 +27,11 @@ export default function AdminButton() {
 
   useEffect(() => {
     refresh();
+  }, []);
+
+  // Portal targets (document.body) aren't guaranteed during the very first render.
+  useEffect(() => {
+    setMounted(true);
   }, []);
 
   const label = useMemo(() => {
@@ -83,31 +90,33 @@ export default function AdminButton() {
         {label}
       </button>
 
-      {open && (
-        <div
-          onClick={() => setOpen(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 10000,
-            background: "rgba(0,0,0,0.6)",
-            display: "grid",
-            placeItems: "center",
-            padding: 16,
-          }}
-        >
+      {open && mounted && typeof document !== "undefined" && document.body &&
+        createPortal(
           <div
-            onClick={(e) => e.stopPropagation()}
+            onClick={() => setOpen(false)}
             style={{
-              width: "min(520px, 100%)",
-              borderRadius: 18,
-              padding: 18,
-              background:
-                "radial-gradient(1200px 600px at 20% 0%, rgba(96,165,250,0.18), transparent 45%), rgba(14,14,14,0.92)",
-              border: "1px solid rgba(255,255,255,0.14)",
-              boxShadow: "0 18px 55px rgba(0,0,0,0.55)",
+              position: "fixed",
+              inset: 0,
+              // Keep it above anything that creates stacking contexts (iOS Safari especially)
+              zIndex: 2147483647,
+              background: "rgba(0,0,0,0.6)",
+              display: "grid",
+              placeItems: "center",
+              padding: 16,
             }}
           >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "min(520px, 100%)",
+                borderRadius: 18,
+                padding: 18,
+                background:
+                  "radial-gradient(1200px 600px at 20% 0%, rgba(96,165,250,0.18), transparent 45%), rgba(14,14,14,0.92)",
+                border: "1px solid rgba(255,255,255,0.14)",
+                boxShadow: "0 18px 55px rgba(0,0,0,0.55)",
+              }}
+            >
             {/* Mini header */}
             <div
               style={{
@@ -341,9 +350,10 @@ export default function AdminButton() {
             )}
 
             {error && <p style={{ color: "tomato", marginTop: 10 }}>{error}</p>}
-          </div>
-        </div>
-      )}
+            </div>
+          </div>,
+          document.body
+        )}
     </>
   );
 }
