@@ -4,6 +4,7 @@ import { useSearchParams } from "next/navigation";
 import TabNav from "../components/TabNav";
 import Pagination from "../components/Pagination";
 import Image from "next/image";
+// import page from "./page";
 
 /* =====================
    TYPES
@@ -16,11 +17,13 @@ type Review = {
 };
 
 type SendEntry = {
-  name: string;
-  type: string; // send | feature | epic | legendary | mythic
+  id?: string;
+  name?: string; // legacy
+  type: string; // rate | feature | epic | legendary | mythic
   comment?: string | null;
   link?: string | null;
   by?: string | null;
+  source?: string | null;
   date: number;
 };
 
@@ -31,7 +34,6 @@ type RejectionEntry = {
   by?: string | null;
   date: number;
 };
-
 
 type AdminState = { isAdmin: boolean; profile: string | null };
 
@@ -57,7 +59,14 @@ type MongoRequest = {
       id?: number | string | null;
     } | null;
     note?: string | null;
-    extraQuestion?: string | null;
+    extraQuestion?: string | null; // legacy
+    videoUrl?: string | null;
+  } | null;
+
+  // New bot field (preferred)
+  extraQuestion?: {
+    question?: string | null;
+    answer?: string | null;
   } | null;
   reviews?: Record<string, Review> | null;
 
@@ -407,7 +416,15 @@ type Filters = {
   difficulty: DifficultyKey[];
   hasVideo: Tri;
   platformer: Tri;
-  helperRating: "any" | "rate" | "feature" | "epic" | "legendary" | "mythic" | "unassigned";
+  helperRating:
+  | "any"
+  | "rate"
+  | "feature"
+  | "epic"
+  | "legendary"
+  | "mythic"
+  | "unassigned";
+  myVisibility: "all" | "hide_sent" | "hide_rejected" | "hide_both";
   sort: SortKey;
 };
 
@@ -418,6 +435,7 @@ const DEFAULT_FILTERS: Filters = {
   hasVideo: "any",
   platformer: "any",
   helperRating: "any",
+  myVisibility: "all",
   sort: "requested_desc",
 };
 
@@ -552,7 +570,19 @@ function StatusChip({ tag }: { tag: TagKey }) {
 /* =====================
    CARD
    ===================== */
-function RequestCard({ r, showLogSend, onLogSend }: { r: MongoRequest; showLogSend: boolean; onLogSend: (requestId: string) => void }) {
+function RequestCard({
+  r,
+  showAdminActions,
+  onLogSend,
+  onLogReject,
+  onViewLog,
+}: {
+  r: MongoRequest;
+  showAdminActions: boolean;
+  onLogSend: (requestId: string) => void;
+  onLogReject: (requestId: string) => void;
+  onViewLog: (r: MongoRequest) => void;
+}) {
   const id = safeStr(r.levelId) || "—";
   const subId = safeStr(r._id) || "—";
   const name = safeStr(r.levelInfo?.name) || "—";
@@ -573,7 +603,8 @@ function RequestCard({ r, showLogSend, onLogSend }: { r: MongoRequest; showLogSe
   const diffKey = getDifficultyKey(r);
   const isDemon = diffKey.startsWith("demon_");
 
-  const yt = safeStr(r.videoUrl);
+  // Always use videoUrl (prefer the bot's levelInfo.videoUrl, then fall back to top-level videoUrl)
+  const yt = safeStr(r.levelInfo?.videoUrl ?? r.videoUrl);
   const ytId = parseYouTubeId(yt);
   const hasVideo = !!ytId;
 
@@ -590,14 +621,14 @@ function RequestCard({ r, showLogSend, onLogSend }: { r: MongoRequest; showLogSe
 
   return (
     <div style={styles.cardMega} className="requestCard">
-      <div style={styles.topStrip}>
+      <div style={styles.topStrip} className="card-top-strip">
         <div style={styles.topStripLeft}>
           <span style={styles.topStripStar}>★</span>
           <span style={styles.topStripTitle}>{bannerText}</span>
         </div>
 
         {showSendsInfo ? (
-          <div style={styles.topStripMid}>
+          <div style={styles.topStripMid} className="card-top-strip-mid">
             <div style={styles.topMiniLine}>
               <span style={styles.topMiniLabel}>Last send:</span>{" "}
               <span style={styles.topMiniValue}>{lastRelative}</span>
@@ -611,7 +642,7 @@ function RequestCard({ r, showLogSend, onLogSend }: { r: MongoRequest; showLogSe
           <div />
         )}
 
-        <div style={styles.topStripRight}>
+        <div style={styles.topStripRight} className="card-top-strip-right">
           <div style={styles.topMiniLine}>
             <span style={styles.topMiniLabel}>Requested on:</span>{" "}
             <span style={styles.topMiniValue}>{requested}</span>
@@ -625,34 +656,71 @@ function RequestCard({ r, showLogSend, onLogSend }: { r: MongoRequest; showLogSe
 
       <div style={styles.stripDivider} />
 
-      <div style={styles.mainRow}>
+      <div style={styles.mainRow} className="card-main-row">
         <div style={styles.leftCol}>
-          <div style={styles.topInfoRow}>
-            <div style={styles.faceStack}>
-              <img src={faceIconPath(r)} alt="" style={styles.faceIcon} />
+          <div style={styles.topInfoRow} className="card-top-info-row">
+            <div
+              style={styles.faceStack}
+              className={`card-face-stack faceStack ${isDemon ? "faceStack--demon" : "faceStack--nondemon"}`}
+            >
+              <img
+                src={faceIconPath(r)}
+                alt=""
+                style={styles.faceIcon}
+                className="card-face-icon"
+              />
 
               {/* DEMON: normal placement. NON-DEMON: move up a bit more */}
-              <div style={isDemon ? styles.countRow : styles.countRowNonDemon}>
-                <span style={{ ...styles.countNumber, color: countColor }}>
+              <div
+                style={isDemon ? styles.countRow : styles.countRowNonDemon}
+                className={
+                  isDemon
+                    ? "card-count-row card-count-row-demon"
+                    : "card-count-row card-count-row-nondemon"
+                }
+              >
+                <span
+                  style={{ ...styles.countNumber, color: countColor }}
+                  className="countText"
+                >
                   {countText}
                 </span>
-                <img src={countIcon} alt="" style={styles.countIcon} />
+                <img
+                  src={countIcon}
+                  alt=""
+                  style={styles.countIcon}
+                  className="countIcon"
+                />
               </div>
             </div>
 
-            <div style={styles.nameCreatorCol}>
-              <div style={styles.nameTopRow}>
-                <div style={styles.levelName} title={name}>
+            <div
+              style={styles.nameCreatorCol}
+              className="card-name-creator-col"
+            >
+              <div style={styles.nameTopRow} className="card-name-top-row">
+                <div
+                  style={styles.levelName}
+                  title={name}
+                  className="card-level-name levelNameText"
+                >
                   {name.toUpperCase()}
                 </div>
-                <div style={styles.tagInlineWrap}>
+                <div
+                  style={styles.tagInlineWrap}
+                  className="card-tag-inline-wrap statusTagWrap"
+                >
                   <StatusChip tag={tag} />
                 </div>
               </div>
 
-              <div style={styles.byLine}>
+              <div style={styles.byLine} className="card-by-line">
                 <span style={styles.byLabel}>By:</span>{" "}
-                <span style={styles.byValue} title={uploader}>
+                <span
+                  style={styles.byValue}
+                  title={uploader}
+                  className="uploaderText"
+                >
                   {uploader}
                 </span>
               </div>
@@ -677,6 +745,22 @@ function RequestCard({ r, showLogSend, onLogSend }: { r: MongoRequest; showLogSe
         </div>
 
         <div style={styles.rightCol}>
+          {/* Standalone YouTube link ABOVE the video */}
+          {hasVideo && (
+            <div style={styles.videoLinkRow} className="videoLinkRow">
+              <a
+                href={yt}
+                target="_blank"
+                rel="noreferrer"
+                style={styles.openYouTubeLink}
+                title="Open this video in YouTube"
+              >
+                Open in YouTube
+              </a>
+            </div>
+          )}
+
+          {/* Video container */}
           <div style={styles.thumbWrap} className={hasVideo ? "thumbGlow" : ""}>
             {hasVideo ? (
               <iframe
@@ -696,7 +780,8 @@ function RequestCard({ r, showLogSend, onLogSend }: { r: MongoRequest; showLogSe
             )}
           </div>
 
-          {showLogSend ? (
+          {/* Admin buttons */}
+          {showAdminActions ? (
             <div style={styles.sendBtnRow}>
               <button
                 onClick={() => onLogSend(subId)}
@@ -704,6 +789,20 @@ function RequestCard({ r, showLogSend, onLogSend }: { r: MongoRequest; showLogSe
                 title="Log a send from the website"
               >
                 Add Send
+              </button>
+              <button
+                onClick={() => onLogReject(subId)}
+                style={styles.addRejectPill}
+                title="Log a reject from the website"
+              >
+                Add Reject
+              </button>
+              <button
+                onClick={() => onViewLog(r)}
+                style={styles.viewLogPill}
+                title="View send/reject log and extra question"
+              >
+                View Log
               </button>
             </div>
           ) : null}
@@ -720,7 +819,10 @@ export default function SearchPage() {
   const [rows, setRows] = useState<MongoRequest[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const [admin, setAdmin] = useState<AdminState>({ isAdmin: false, profile: null });
+  const [admin, setAdmin] = useState<AdminState>({
+    isAdmin: false,
+    profile: null,
+  });
 
   useEffect(() => {
     fetch("/api/admin/me", { cache: "no-store" })
@@ -746,6 +848,15 @@ export default function SearchPage() {
   const [sendSubmitting, setSendSubmitting] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
+  const [rejectComment, setRejectComment] = useState<string>("");
+  const [rejectSubmitting, setRejectSubmitting] = useState(false);
+  const [rejectError, setRejectError] = useState<string | null>(null);
+
+  const [logModalOpen, setLogModalOpen] = useState(false);
+  const [logTarget, setLogTarget] = useState<MongoRequest | null>(null);
+
   function openSendModal(requestId: string) {
     setSendTargetId(requestId);
     setSendRating("send-only");
@@ -754,16 +865,31 @@ export default function SearchPage() {
     setSendModalOpen(true);
   }
 
+  function openRejectModal(requestId: string) {
+    setRejectTargetId(requestId);
+    setRejectComment("");
+    setRejectError(null);
+    setRejectModalOpen(true);
+  }
+
+  function openLogModal(r: MongoRequest) {
+    setLogTarget(r);
+    setLogModalOpen(true);
+  }
+
   async function submitSend() {
     if (!sendTargetId) return;
     setSendSubmitting(true);
     setSendError(null);
     try {
-      const res = await fetch(`/api/requests/${encodeURIComponent(sendTargetId)}/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rating: sendRating, comment: sendComment }),
-      });
+      const res = await fetch(
+        `/api/requests/${encodeURIComponent(sendTargetId)}/send`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rating: sendRating, comment: sendComment }),
+        }
+      );
 
       const data = await res.json().catch(() => ({} as any));
       if (!res.ok || data?.ok === false) {
@@ -772,8 +898,6 @@ export default function SearchPage() {
       }
 
       setSendModalOpen(false);
-      // Refresh list so the updated send count appears.
-      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       await fetchRows();
     } catch (e: any) {
       setSendError(String(e?.message ?? e));
@@ -781,6 +905,36 @@ export default function SearchPage() {
       setSendSubmitting(false);
     }
   }
+
+  async function submitReject() {
+    if (!rejectTargetId) return;
+    setRejectSubmitting(true);
+    setRejectError(null);
+    try {
+      const res = await fetch(
+        `/api/requests/${encodeURIComponent(rejectTargetId)}/reject`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ comment: rejectComment }),
+        }
+      );
+
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || data?.ok === false) {
+        setRejectError(data?.error || "Failed to log reject.");
+        return;
+      }
+
+      setRejectModalOpen(false);
+      await fetchRows();
+    } catch (e: any) {
+      setRejectError(String(e?.message ?? e));
+    } finally {
+      setRejectSubmitting(false);
+    }
+  }
+
   const [showFilters, setShowFilters] = useState(false);
 
   // Preset shortcuts (used by the Home page buttons and legacy routes)
@@ -807,7 +961,6 @@ export default function SearchPage() {
       return;
     }
   }, [preset]);
-
 
   const [currentPage, setCurrentPage] = useState(1);
   const limit = 6;
@@ -850,18 +1003,12 @@ export default function SearchPage() {
       // ✅ include more searchable fields
       const desc = safeStr(r.levelInfo?.description);
       const note = safeStr(r.levelInfo?.note);
-      const extra = safeStr(r.levelInfo?.extraQuestion);
+      const extraQ =
+        safeStr(r.extraQuestion?.question) || safeStr(r.levelInfo?.extraQuestion);
+      const extraA = safeStr(r.extraQuestion?.answer);
 
       // ✅ one combined blob for fast search (lowercased once)
-      const searchBlob = [
-        id,
-        subId,
-        levelName,
-        uploaderName,
-        desc,
-        note,
-        extra,
-      ]
+      const searchBlob = [id, subId, levelName, uploaderName, desc, note, extraQ, extraA]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
@@ -873,7 +1020,7 @@ export default function SearchPage() {
       const count = getCount(r);
       const diffKey = getDifficultyKey(r);
       const platformer = !!r.levelInfo?.platformer;
-      const hasVideo = !!youtubeThumb(safeStr(r.videoUrl));
+      const hasVideo = !!youtubeThumb(safeStr(r.levelInfo?.videoUrl ?? r.videoUrl));
       const helperRating = normalizeHelperRating(r.helperReview?.rating);
 
       return {
@@ -903,6 +1050,20 @@ export default function SearchPage() {
     const diffs = new Set(filters.difficulty);
 
     let list = computed.filter((x) => {
+      // Admin-only: hide levels the current mod has already sent/rejected
+      if (admin.isAdmin && admin.profile && filters.myVisibility !== "all") {
+        const p = admin.profile;
+        const mySent =
+          Array.isArray(x.r.sends) && x.r.sends.some((s) => safeStr((s as any)?.by) === p);
+        const myRej =
+          Array.isArray(x.r.rejections) &&
+          x.r.rejections.some((rr) => safeStr((rr as any)?.name) === p);
+
+        if (filters.myVisibility === "hide_sent" && mySent) return false;
+        if (filters.myVisibility === "hide_rejected" && myRej) return false;
+        if (filters.myVisibility === "hide_both" && (mySent || myRej)) return false;
+      }
+
       if (text) {
         const hit =
           x.id.toLowerCase().includes(text) ||
@@ -910,6 +1071,7 @@ export default function SearchPage() {
           x.uploaderName.toLowerCase().includes(text);
         if (!hit) return false;
       }
+
       if (tags.size > 0 && !tags.has(x.tag)) return false;
       if (diffs.size > 0 && !diffs.has(x.diffKey)) return false;
 
@@ -931,8 +1093,7 @@ export default function SearchPage() {
     });
 
     const sort = filters.sort;
-    const cmpStr = (a: string, b: string) =>
-      a.localeCompare(b, undefined, { sensitivity: "base" });
+    const cmpStr = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });
 
     list.sort((A, B) => {
       switch (sort) {
@@ -970,7 +1131,7 @@ export default function SearchPage() {
     });
 
     return list;
-  }, [computed, filters]);
+  }, [computed, filters, admin.isAdmin, admin.profile]);
 
   const total = filtered.length;
   const totalPages = Math.max(1, Math.ceil(total / limit));
@@ -1032,8 +1193,8 @@ export default function SearchPage() {
           <div style={styles.disclaimer} className="frosted-glass animate-fade-in">
             <strong>⚠️ Safety Notice</strong>
             <p style={{ margin: "8px 0 0 0", fontSize: 14, opacity: 0.85 }}>
-              Be cautious when clicking on video links. Only click links you trust or that belong to you.
-              External links may lead to unexpected or potentially harmful content.
+              Be cautious when clicking on video links. Only click links you trust or that belong to
+              you. External links may lead to unexpected or potentially harmful content.
             </p>
           </div>
 
@@ -1067,6 +1228,7 @@ export default function SearchPage() {
                 <option value="stars_desc">Stars/Moons (High → Low)</option>
                 <option value="stars_asc">Stars/Moons (Low → High)</option>
               </MiniSelect>
+
               <button
                 type="button"
                 onClick={() => setShowFilters((v) => !v)}
@@ -1075,12 +1237,8 @@ export default function SearchPage() {
               >
                 {showFilters ? "Hide filters" : "Show filters"}
               </button>
-              <button
-                type="button"
-                onClick={clearAll}
-                style={styles.clearBtn}
-                className="clearBtn"
-              >
+
+              <button type="button" onClick={clearAll} style={styles.clearBtn} className="clearBtn">
                 Clear
               </button>
             </div>
@@ -1092,14 +1250,35 @@ export default function SearchPage() {
                 <div style={{ flex: 1, minWidth: 260 }}>
                   <SectionTitle>Tags</SectionTitle>
                   <div style={styles.chipRow}>
-                    <Chip active={filters.tags.includes("pending")} label="Pending Review" onClick={() => toggleTag("pending")} />
-                    <Chip active={filters.tags.includes("sending")} label="Accepted" onClick={() => toggleTag("sending")} />
-                    <Chip active={filters.tags.includes("rated")} label="Rated" onClick={() => toggleTag("rated")} />
-                    <Chip active={filters.tags.includes("rejected")} label="Not Accepted" onClick={() => toggleTag("rejected")} />
-                    <Chip active={filters.tags.includes("stolen")} label="Stolen" onClick={() => toggleTag("stolen")} />
+                    <Chip
+                      active={filters.tags.includes("pending")}
+                      label="Pending Review"
+                      onClick={() => toggleTag("pending")}
+                    />
+                    <Chip
+                      active={filters.tags.includes("sending")}
+                      label="Accepted"
+                      onClick={() => toggleTag("sending")}
+                    />
+                    <Chip
+                      active={filters.tags.includes("rated")}
+                      label="Rated"
+                      onClick={() => toggleTag("rated")}
+                    />
+                    <Chip
+                      active={filters.tags.includes("rejected")}
+                      label="Not Accepted"
+                      onClick={() => toggleTag("rejected")}
+                    />
+                    <Chip
+                      active={filters.tags.includes("stolen")}
+                      label="Stolen"
+                      onClick={() => toggleTag("stolen")}
+                    />
                     <Chip active={filters.tags.includes("dne")} label="DNE" onClick={() => toggleTag("dne")} />
                   </div>
                 </div>
+
                 <div style={{ width: 280, minWidth: 240 }}>
                   <SectionTitle>Suggested Rating</SectionTitle>
                   <MiniSelect
@@ -1124,10 +1303,37 @@ export default function SearchPage() {
                   <button type="button" onClick={() => cycleTri("hasVideo")} style={styles.triBtn} className="triBtn">
                     {triLabel(filters.hasVideo)}
                   </button>
+
                   <SectionTitle style={{ marginTop: 12 }}>Platformer?</SectionTitle>
-                  <button type="button" onClick={() => cycleTri("platformer")} style={styles.triBtn} className="triBtn">
+                  <button
+                    type="button"
+                    onClick={() => cycleTri("platformer")}
+                    style={styles.triBtn}
+                    className="triBtn"
+                  >
                     {triLabel(filters.platformer)}
                   </button>
+
+                  {admin.isAdmin && admin.profile ? (
+                    <>
+                      <SectionTitle style={{ marginTop: 12 }}>My checked filter</SectionTitle>
+                      <MiniSelect
+                        value={filters.myVisibility}
+                        onChange={(e) =>
+                          setFilters((p) => ({
+                            ...p,
+                            myVisibility: e.target.value as any,
+                          }))
+                        }
+                        title="Hide entries where your moderator profile appears in sends/rejections"
+                      >
+                        <option value="all">Show all</option>
+                        <option value="hide_sent">Hide my sent</option>
+                        <option value="hide_rejected">Hide my rejected</option>
+                        <option value="hide_both">Hide both</option>
+                      </MiniSelect>
+                    </>
+                  ) : null}
                 </div>
               </FieldRow>
 
@@ -1137,15 +1343,47 @@ export default function SearchPage() {
                   <div style={styles.chipRow}>
                     <Chip active={filters.difficulty.includes("auto")} label="Auto" onClick={() => toggleDiff("auto")} />
                     <Chip active={filters.difficulty.includes("easy")} label="Easy" onClick={() => toggleDiff("easy")} />
-                    <Chip active={filters.difficulty.includes("normal")} label="Normal" onClick={() => toggleDiff("normal")} />
+                    <Chip
+                      active={filters.difficulty.includes("normal")}
+                      label="Normal"
+                      onClick={() => toggleDiff("normal")}
+                    />
                     <Chip active={filters.difficulty.includes("hard")} label="Hard" onClick={() => toggleDiff("hard")} />
-                    <Chip active={filters.difficulty.includes("harder")} label="Harder" onClick={() => toggleDiff("harder")} />
-                    <Chip active={filters.difficulty.includes("insane")} label="Insane" onClick={() => toggleDiff("insane")} />
-                    <Chip active={filters.difficulty.includes("demon_easy")} label="Easy Demon" onClick={() => toggleDiff("demon_easy")} />
-                    <Chip active={filters.difficulty.includes("demon_medium")} label="Medium Demon" onClick={() => toggleDiff("demon_medium")} />
-                    <Chip active={filters.difficulty.includes("demon_hard")} label="Hard Demon" onClick={() => toggleDiff("demon_hard")} />
-                    <Chip active={filters.difficulty.includes("demon_insane")} label="Insane Demon" onClick={() => toggleDiff("demon_insane")} />
-                    <Chip active={filters.difficulty.includes("demon_extreme")} label="Extreme Demon" onClick={() => toggleDiff("demon_extreme")} />
+                    <Chip
+                      active={filters.difficulty.includes("harder")}
+                      label="Harder"
+                      onClick={() => toggleDiff("harder")}
+                    />
+                    <Chip
+                      active={filters.difficulty.includes("insane")}
+                      label="Insane"
+                      onClick={() => toggleDiff("insane")}
+                    />
+                    <Chip
+                      active={filters.difficulty.includes("demon_easy")}
+                      label="Easy Demon"
+                      onClick={() => toggleDiff("demon_easy")}
+                    />
+                    <Chip
+                      active={filters.difficulty.includes("demon_medium")}
+                      label="Medium Demon"
+                      onClick={() => toggleDiff("demon_medium")}
+                    />
+                    <Chip
+                      active={filters.difficulty.includes("demon_hard")}
+                      label="Hard Demon"
+                      onClick={() => toggleDiff("demon_hard")}
+                    />
+                    <Chip
+                      active={filters.difficulty.includes("demon_insane")}
+                      label="Insane Demon"
+                      onClick={() => toggleDiff("demon_insane")}
+                    />
+                    <Chip
+                      active={filters.difficulty.includes("demon_extreme")}
+                      label="Extreme Demon"
+                      onClick={() => toggleDiff("demon_extreme")}
+                    />
                   </div>
                 </div>
               </FieldRow>
@@ -1166,12 +1404,14 @@ export default function SearchPage() {
               const r = x.r;
               const key = String(r._id ?? r.levelId ?? `${i}`);
               return (
-                <div
-                  key={key}
-                  style={{ animationDelay: `${i * 0.05}s` }}
-                  className="animate-slide-in-up"
-                >
-                  <RequestCard r={r} showLogSend={admin.isAdmin && !!admin.profile} onLogSend={openSendModal} />
+                <div key={key} style={{ animationDelay: `${i * 0.05}s` }} className="animate-slide-in-up">
+                  <RequestCard
+                    r={r}
+                    showAdminActions={admin.isAdmin && !!admin.profile}
+                    onLogSend={openSendModal}
+                    onLogReject={openRejectModal}
+                    onViewLog={openLogModal}
+                  />
                 </div>
               );
             })}
@@ -1219,9 +1459,7 @@ export default function SearchPage() {
                 Moderator: <b>{admin.profile ?? "—"}</b>
               </p>
 
-              <label style={{ display: "block", marginTop: 10, opacity: 0.85 }}>
-                Select rating
-              </label>
+              <label style={{ display: "block", marginTop: 10, opacity: 0.85 }}>Select rating</label>
               <select
                 value={sendRating}
                 onChange={(e) => setSendRating(e.target.value as any)}
@@ -1282,17 +1520,237 @@ export default function SearchPage() {
                 {sendSubmitting ? "Submitting…" : "Submit"}
               </button>
 
-              {sendError && (
-                <p style={{ marginTop: 10, color: "tomato", fontWeight: 700 }}>
-                  {sendError}
-                </p>
-              )}
+              {sendError && <p style={{ marginTop: 10, color: "tomato", fontWeight: 700 }}>{sendError}</p>}
+            </div>
+          </div>
+        )}
+
+        {rejectModalOpen && (
+          <div
+            onClick={() => setRejectModalOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 10000,
+              background: "rgba(0,0,0,0.6)",
+              display: "grid",
+              placeItems: "center",
+              padding: 16,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "min(520px, 100%)",
+                borderRadius: 16,
+                padding: 16,
+                background: "rgba(20,20,20,0.95)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                boxShadow: "0 12px 40px rgba(0,0,0,0.45)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>Log Reject</h3>
+                <button onClick={() => setRejectModalOpen(false)} style={{ opacity: 0.8 }}>
+                  ✕
+                </button>
+              </div>
+
+              <p style={{ opacity: 0.8, marginTop: 10 }}>
+                Moderator: <b>{admin.profile ?? "—"}</b>
+              </p>
+
+              <label style={{ display: "block", marginTop: 12, opacity: 0.85 }}>
+                Reject comment (optional)
+              </label>
+              <textarea
+                value={rejectComment}
+                onChange={(e) => setRejectComment(e.target.value)}
+                placeholder="Add a short note to include in the #rejects message (optional)"
+                rows={3}
+                style={{
+                  width: "100%",
+                  padding: 10,
+                  borderRadius: 12,
+                  marginTop: 8,
+                  background: "rgba(255,255,255,0.08)",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  color: "white",
+                  outline: "none",
+                  resize: "vertical",
+                }}
+              />
+
+              <button
+                onClick={submitReject}
+                disabled={rejectSubmitting}
+                style={{
+                  marginTop: 12,
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  fontWeight: 900,
+                  background: "rgba(255,255,255,0.14)",
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  color: "white",
+                  cursor: "pointer",
+                  opacity: rejectSubmitting ? 0.7 : 1,
+                }}
+              >
+                {rejectSubmitting ? "Submitting…" : "Submit"}
+              </button>
+
+              {rejectError && <p style={{ marginTop: 10, color: "tomato", fontWeight: 700 }}>{rejectError}</p>}
+            </div>
+          </div>
+        )}
+
+        {logModalOpen && logTarget && (
+          <div
+            onClick={() => setLogModalOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 10000,
+              background: "rgba(0,0,0,0.6)",
+              display: "grid",
+              placeItems: "center",
+              padding: 16,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "min(700px, 100%)",
+                maxHeight: "min(82vh, 900px)",
+                overflow: "auto",
+                borderRadius: 16,
+                padding: 16,
+                background: "rgba(20,20,20,0.95)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                boxShadow: "0 12px 40px rgba(0,0,0,0.45)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>Request Log</h3>
+                <button onClick={() => setLogModalOpen(false)} style={{ opacity: 0.8 }}>
+                  ✕
+                </button>
+              </div>
+
+              <p style={{ opacity: 0.85, marginTop: 10, marginBottom: 12 }}>
+                <b>{safeStr(logTarget.levelInfo?.name) || "—"}</b> &nbsp;•&nbsp; Request ID:{" "}
+                <b>{safeStr(logTarget._id) || "—"}</b>
+              </p>
+
+              <div style={{ display: "grid", gap: 12 }}>
+                <div
+                  style={{
+                    borderRadius: 14,
+                    padding: 12,
+                    border: "1px solid rgba(255,255,255,0.10)",
+                    background: "rgba(255,255,255,0.04)",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, marginBottom: 8 }}>Sends</div>
+                  {Array.isArray(logTarget.sends) && logTarget.sends.length ? (
+                    <div style={{ display: "grid", gap: 6 }}>
+                      {logTarget.sends
+                        .slice()
+                        .sort((a, b) => (b.date ?? 0) - (a.date ?? 0))
+                        .map((s, idx) => (
+                          <div key={String((s as any)?.id ?? idx)} style={{ opacity: 0.9 }}>
+                            • {safeStr((s as any)?.by) || "—"}
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <div style={{ opacity: 0.75 }}>—</div>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    borderRadius: 14,
+                    padding: 12,
+                    border: "1px solid rgba(255,255,255,0.10)",
+                    background: "rgba(255,255,255,0.04)",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, marginBottom: 8 }}>Rejections</div>
+                  {Array.isArray(logTarget.rejections) && logTarget.rejections.length ? (
+                    <div style={{ display: "grid", gap: 6 }}>
+                      {logTarget.rejections
+                        .slice()
+                        .sort((a, b) => (b.date ?? 0) - (a.date ?? 0))
+                        .map((rr, idx) => (
+                          <div key={String((rr as any)?.id ?? idx)} style={{ opacity: 0.9 }}>
+                            • {safeStr((rr as any)?.name) || "—"}
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <div style={{ opacity: 0.75 }}>—</div>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    borderRadius: 14,
+                    padding: 12,
+                    border: "1px solid rgba(255,255,255,0.10)",
+                    background: "rgba(255,255,255,0.04)",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, marginBottom: 8 }}>Extra Question</div>
+                  <div style={{ opacity: 0.85 }}>
+                    <div>
+                      <span style={{ opacity: 0.8 }}>Question:</span>{" "}
+                      {safeStr(logTarget.extraQuestion?.question) || ""}
+                    </div>
+                    <div style={{ marginTop: 6 }}>
+                      <span style={{ opacity: 0.8 }}>Answer:</span>{" "}
+                      {safeStr(logTarget.extraQuestion?.answer) || ""}
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    borderRadius: 14,
+                    padding: 12,
+                    border: "1px solid rgba(255,255,255,0.10)",
+                    background: "rgba(255,255,255,0.04)",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, marginBottom: 8 }}>Helper Suggested Rating</div>
+                  <div style={{ opacity: 0.85 }}>
+                    {(() => {
+                      const hr = normalizeHelperRating(logTarget.helperReview?.rating);
+                      if (hr === "unassigned") return "—";
+                      if (hr === "rate") return "Rate";
+                      return hr.charAt(0).toUpperCase() + hr.slice(1);
+                    })()}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
       </main>
 
       <style jsx>{`
+        /* Desktop / wide screens: default truncation (matches previous inline styles) */
+        .card-level-name {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .uploaderText {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
         .requestCard {
           transform: translateY(0px);
           transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1),
@@ -1314,6 +1772,127 @@ export default function SearchPage() {
           transform: translateY(-1px);
           opacity: 0.96;
         }
+
+        /* ===========================
+           MOBILE-ONLY CARD REDESIGN
+           (max-width: 820px)
+           Desktop styles are untouched.
+           =========================== */
+        @media (max-width: 820px) {
+
+          /* --- Mobile-only: move the "Open in YouTube" link to the top-left of the whole card --- */
+          .requestCard {
+            position: relative;
+          }
+
+          .videoLinkRow {
+            position: absolute;
+            top: 10px;
+            left: 12px;
+            margin: 0 !important;
+            z-index: 5;
+            justify-content: flex-start !important;
+          }
+
+          /* --- Top strip: stack into a single column --- */
+          .card-top-strip {
+            grid-template-columns: 1fr !important;
+            gap: 6px !important;
+            padding: 10px 12px !important;
+          }
+          .card-top-strip-mid {
+            text-align: left !important;
+          }
+          .card-top-strip-right {
+            text-align: left !important;
+          }
+
+          /* --- Main row: single column, tight padding --- */
+          .card-main-row {
+            grid-template-columns: 1fr !important;
+            padding: 14px 12px 12px !important;
+            gap: 14px !important;
+          }
+
+          /* --- Header area: text left, face stack right (like your mock) --- */
+          .card-top-info-row {
+            gap: 12px !important;
+            align-items: flex-start !important;
+            justify-content: space-between !important;
+          }
+
+          .card-name-creator-col {
+            order: 1 !important;
+            margin-left: 0px !important;
+            min-width: 0 !important;
+            position: relative !important;
+            padding-bottom: 54px !important; /* room for the status pill */
+          }
+
+          .card-face-stack {
+            order: 2 !important;
+            align-items: flex-end !important;
+            min-width: 110px !important;
+          }
+
+          /* --- Face icon: smaller + clean alignment --- */
+          .card-face-icon {
+            width: 92px !important;
+            height: 92px !important;
+            transform: translateY(-10px) !important;
+            margin-left: 0px !important;
+          }
+
+          /* --- Count row: keep under the face. IMPORTANT: don't move the container,
+               so your .countIcon and .countText can be adjusted independently via globals.css vars. --- */
+          .card-count-row-demon {
+            margin-top: -18px !important;
+            transform: none !important;
+            justify-content: flex-end !important;
+          }
+          .card-count-row-nondemon {
+            margin-top: -20px !important;
+            transform: none !important;
+            justify-content: flex-end !important;
+          }
+
+          /* --- Name area: big + wraps nicely --- */
+          .card-name-top-row {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 8px !important;
+            min-width: 0 !important;
+          }
+
+          .card-level-name {
+            font-size: 34px !important;
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+            line-height: 1.05 !important;
+            width: 100% !important;
+          }
+
+          /* Mobile: allow uploader to fully show as well */
+          .uploaderText {
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+          }
+
+          .card-by-line {
+            font-size: 16px !important;
+          }
+
+          /* --- Status tag: pin to bottom of the name block (sits near the ID pill area) --- */
+          .card-tag-inline-wrap {
+            position: absolute !important;
+            left: 0 !important;
+            bottom: 0 !important;
+            width: auto !important;
+            align-self: flex-start !important;
+          }
+        }
       `}</style>
     </>
   );
@@ -1323,6 +1902,18 @@ export default function SearchPage() {
    STYLES
    ===================== */
 const styles: Record<string, React.CSSProperties> = {
+  videoLinkRow: {
+    display: "flex",
+    justifyContent: "flex-end",
+    marginBottom: 6,
+  },
+
+  openYouTubeLink: {
+    color: "#3b82f6",
+    textDecoration: "underline",
+    fontWeight: 500,
+    fontSize: 14,
+  },
   page: {
     minHeight: "100vh",
     // Extra top padding so content clears the fixed navbar on desktop + mobile
@@ -1345,8 +1936,7 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "center",
     margin: 0,
     marginBottom: 18,
-    background:
-      "linear-gradient(135deg, var(--accent) 0%, var(--accent-light) 100%)",
+    background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-light) 100%)",
     WebkitBackgroundClip: "text",
     WebkitTextFillColor: "transparent",
     backgroundClip: "text",
@@ -1440,8 +2030,7 @@ const styles: Record<string, React.CSSProperties> = {
     userSelect: "none",
   },
   chipActive: {
-    background:
-      "linear-gradient(135deg, rgba(59,130,246,0.22), rgba(168,85,247,0.16))",
+    background: "linear-gradient(135deg, rgba(59,130,246,0.22), rgba(168,85,247,0.16))",
     border: "1px solid rgba(255,255,255,0.20)",
     boxShadow: "0 10px 22px rgba(0,0,0,0.22)",
   },
@@ -1582,7 +2171,6 @@ const styles: Record<string, React.CSSProperties> = {
     border: "none",
     background: "transparent",
     marginTop: -47,
-    transform: "translateX(-13px)",
   },
 
   // NON-DEMONS: push the star/moon row a bit higher
@@ -1594,8 +2182,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 0,
     border: "none",
     background: "transparent",
-    marginTop: -62, // <-- higher than demon version
-    transform: "translateX(-13px)",
+    marginTop: -62,
   },
 
   // Uses CSS vars so we can shrink on mobile without rewriting the card
@@ -1631,9 +2218,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 950,
     letterSpacing: 0.8,
     textShadow: "0 14px 30px rgba(0,0,0,0.35)",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
   },
 
   tagInlineWrap: { flexShrink: 0, display: "flex", alignItems: "center" },
@@ -1643,9 +2227,6 @@ const styles: Record<string, React.CSSProperties> = {
   byValue: {
     fontWeight: 900,
     opacity: 0.98,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
     display: "inline-block",
     maxWidth: "100%",
     verticalAlign: "bottom",
@@ -1715,6 +2296,8 @@ const styles: Record<string, React.CSSProperties> = {
   sendBtnRow: {
     display: "flex",
     justifyContent: "flex-end",
+    gap: 8,
+    flexWrap: "wrap",
     marginTop: 10,
   },
   addSendPill: {
@@ -1725,6 +2308,32 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     border: "1px solid rgba(34,197,94,0.35)",
     background: "rgba(34,197,94,0.18)",
+    color: "white",
+    boxShadow: "0 10px 28px rgba(0,0,0,0.35)",
+    transition: "transform 120ms ease, filter 120ms ease",
+  },
+
+  addRejectPill: {
+    padding: "10px 14px",
+    borderRadius: 999,
+    fontWeight: 950,
+    fontSize: 13,
+    cursor: "pointer",
+    border: "1px solid rgba(239,68,68,0.35)",
+    background: "rgba(239,68,68,0.16)",
+    color: "white",
+    boxShadow: "0 10px 28px rgba(0,0,0,0.35)",
+    transition: "transform 120ms ease, filter 120ms ease",
+  },
+
+  viewLogPill: {
+    padding: "10px 14px",
+    borderRadius: 999,
+    fontWeight: 950,
+    fontSize: 13,
+    cursor: "pointer",
+    border: "1px solid rgba(255,255,255,0.20)",
+    background: "rgba(255,255,255,0.10)",
     color: "white",
     boxShadow: "0 10px 28px rgba(0,0,0,0.35)",
     transition: "transform 120ms ease, filter 120ms ease",
@@ -1745,27 +2354,21 @@ const styles: Record<string, React.CSSProperties> = {
   },
   tagText: { opacity: 0.98 },
   tagPending: {
-    background:
-      "linear-gradient(135deg, rgba(250,204,21,0.24), rgba(245,158,11,0.10))",
+    background: "linear-gradient(135deg, rgba(250,204,21,0.24), rgba(245,158,11,0.10))",
   },
   tagSending: {
-    background:
-      "linear-gradient(135deg, rgba(16,185,129,0.24), rgba(34,197,94,0.10))",
+    background: "linear-gradient(135deg, rgba(16,185,129,0.24), rgba(34,197,94,0.10))",
   },
   tagRated: {
-    background:
-      "linear-gradient(135deg, rgba(168,85,247,0.24), rgba(236,72,153,0.10))",
+    background: "linear-gradient(135deg, rgba(168,85,247,0.24), rgba(236,72,153,0.10))",
   },
   tagRejected: {
-    background:
-      "linear-gradient(135deg, rgba(236,72,153,0.24), rgba(168,85,247,0.10))",
+    background: "linear-gradient(135deg, rgba(236,72,153,0.24), rgba(168,85,247,0.10))",
   },
   tagStolen: {
-    background:
-      "linear-gradient(135deg, rgba(239,68,68,0.24), rgba(245,158,11,0.10))",
+    background: "linear-gradient(135deg, rgba(239,68,68,0.24), rgba(245,158,11,0.10))",
   },
   tagDNE: {
-    background:
-      "linear-gradient(135deg, rgba(148,163,184,0.22), rgba(100,116,139,0.10))",
+    background: "linear-gradient(135deg, rgba(148,163,184,0.22), rgba(100,116,139,0.10))",
   },
 };
