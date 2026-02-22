@@ -128,10 +128,10 @@ export default function HomePage() {
     <>
       <TabNav />
       <AdminButton />
-      <main style={styles.page}>
+      <main style={styles.page} className="homePageMain">
         <div style={styles.container}>
           {/* Logo (no card, matches the reference) */}
-          <div style={styles.logoWrap}>
+          <div style={styles.logoWrap} className="homeLogoWrap">
             <img
               src="/slimefactory-requests.png"
               alt="The Slime Factory Requests"
@@ -172,8 +172,20 @@ export default function HomePage() {
             <div className="homeQuickRow" style={styles.quickRow}>
               <ActionBtn href="/search" label="Search" tone="blue" icon="search" />
               <ActionBtn href="/search?preset=sends" label="Latest Sends" tone="green" icon="rocket" />
-              <ActionBtn href="/search?preset=submissions" label="Latest Submissions" tone="purple" icon="clock" />
-              <ActionBtn href="https://discord.gg/3Sctyn3ekP" label="Send feedback" tone="orange" icon="mail" />
+              <ActionBtn
+                href="/search?preset=submissions"
+                label="Latest Submissions"
+                tone="purple"
+                icon="clock"
+                className="homeQuickBtn--wide"
+              />
+              <ActionBtn
+                href="https://discord.gg/3Sctyn3ekP"
+                label="Send feedback"
+                tone="orange"
+                icon="mail"
+                className="homeQuickBtn--wide"
+              />
             </div>
           </section>
 
@@ -208,12 +220,12 @@ function StatPill({
   icon: IconName;
 }) {
   return (
-    <div style={{ ...styles.pill, ...(toneStyles[tone] || {}) }}>
+    <div className="homeStatPill" style={{ ...styles.pill, ...(toneStyles[tone] || {}) }}>
       <div style={styles.pillLeft}>
         <div style={styles.pillTitle}>{title}</div>
-        <div style={styles.pillValue}>{value}</div>
+        <div className="homeStatValue" style={styles.pillValue}>{value}</div>
       </div>
-      <div style={styles.pillIconWrap} aria-hidden="true">
+      <div className="homeStatIcon" style={styles.pillIconWrap} aria-hidden="true">
         <Icon name={icon} />
       </div>
     </div>
@@ -355,11 +367,13 @@ function ActionBtn({
   label,
   tone,
   icon,
+  className,
 }: {
   href: string;
   label: string;
   tone: "blue" | "green" | "purple" | "orange";
   icon: IconName;
+  className?: string;
 }) {
   const toneStyle =
     tone === "blue"
@@ -371,11 +385,11 @@ function ActionBtn({
           : styles.btnOrange;
 
   return (
-    <Link href={href} className="homeQuickBtn" style={{ ...styles.quickBtn, ...toneStyle }}>
+    <Link href={href} className={`homeQuickBtn ${className ?? ""}`.trim()} style={{ ...styles.quickBtn, ...toneStyle }}>
       <span style={styles.quickBtnIcon} aria-hidden="true">
         <Icon name={icon} />
       </span>
-      <span>{label}</span>
+      <span className="homeQuickLabel">{label}</span>
     </Link>
   );
 }
@@ -411,7 +425,7 @@ const styles: Record<string, React.CSSProperties> = {
   page: {
     minHeight: "100vh",
     // Extra top padding so content clears the fixed navbar on desktop + mobile
-    paddingTop: "clamp(110px, 18vw, 150px)",
+    paddingTop: "var(--home-pad-top, clamp(110px, 18vw, 150px))",
     paddingLeft: "clamp(14px, 4vw, 22px)",
     paddingRight: "clamp(14px, 4vw, 22px)",
     paddingBottom: 28,
@@ -429,8 +443,8 @@ const styles: Record<string, React.CSSProperties> = {
   logoWrap: {
     display: "flex",
     justifyContent: "center",
-    marginTop: -60,
-    marginLeft: -20,
+    marginTop: "var(--home-logo-mt, -60px)" as any,
+    marginLeft: "var(--home-logo-ml, -20px)" as any,
   },
   logo: {
     width: "min(1260px, 200%)",

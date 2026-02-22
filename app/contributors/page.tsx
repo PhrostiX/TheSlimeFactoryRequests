@@ -32,7 +32,7 @@ export default function ContributorsPage() {
     <>
       <TabNav />
 
-      <main style={styles.page}>
+      <main style={styles.page} className="contributorsPage">
         <section style={styles.container} className="frosted-glass-strong">
           <div style={styles.hero}>
             <Image
@@ -115,7 +115,7 @@ function RoleCard({ person }: { person: Person }) {
   const badgeSrc = person.badge === "dev" ? DEV_BADGE : MOD_BADGE;
 
   return (
-    <div style={styles.card} className="frosted-glass">
+    <div style={styles.card} className="frosted-glass roleCard">
       <div style={styles.cardLeft}>
         <img
           src={badgeSrc}
@@ -123,10 +123,10 @@ function RoleCard({ person }: { person: Person }) {
           style={person.badge === "dev" ? styles.badgeDev : styles.badgeMod}
           draggable={false}
         />
-        <div style={styles.cardName}>{person.name}</div>
+        <div style={styles.cardName} className="roleCardName">{person.name}</div>
       </div>
 
-      <div style={styles.cardRole}>{person.title}</div>
+      <div style={styles.cardRole} className="roleCardRole">{person.title}</div>
     </div>
   );
 }

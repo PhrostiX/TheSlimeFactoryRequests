@@ -300,18 +300,22 @@ body {
   transform: translate(var(--levelname-x-desktop), var(--levelname-y-desktop));
 }
 
-.uploaderText {
+.uploaderWrap {
   transform: translate(var(--uploader-x-desktop), var(--uploader-y-desktop));
 }
 
+.uploaderText {
+  transform: none !important;
+}
 @media (max-width: 820px) {
   .levelNameText {
     transform: translate(var(--levelname-x-mobile), var(--levelname-y-mobile));
   }
-  .uploaderText {
+  .uploaderWrap {
     transform: translate(var(--uploader-x-mobile), var(--uploader-y-mobile));
   }
 }
+
 
 /* =====================
    YOUR EXISTING GLOW / VIGNETTE
@@ -356,4 +360,113 @@ body > * {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+/* ===================== ADMIN PILL + BOTTOM NAV ===================== */
+.adminPillBtn{
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-weight: 950;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.18);
+  color: rgba(255,255,255,0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: transform 160ms ease, filter 160ms ease, background 160ms ease;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.adminPillBtn:hover{
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  background: rgba(255,255,255,0.10);
+}
+.adminPillBtn.isAdmin{
+  background: rgba(96,165,250,0.16);
+  border-color: rgba(96,165,250,0.35);
+}
+
+/* Bottom nav removed (admin pill lives in the top nav). */
+
+
+/* ===================== HOME MOBILE LAYOUT FIXES ===================== */
+@media (max-width: 640px){
+  .homePillRow{
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+    padding-right: 6px;
+  }
+  .homeQuickRow{
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+
+  /* Option A: allow the long "Latest Submissions" button to span full width on mobile */
+  .homeQuickBtn--wide{
+    grid-column: 1 / -1;
+  }
+
+  /* Make stats pills more resilient for double-digit values */
+  .homeStatValue{ font-size: 22px !important; }
+  /* Mobile: remove the symbols entirely (they clip on narrow layouts) */
+  .homeStatIcon{ display: none !important; }
+
+  /* Keep quick action labels from wrapping */
+  .homeQuickBtn{ min-width: 0; }
+  .homeQuickLabel{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+
+
+/* ===================== CARD TITLE / STATUS MOBILE BEHAVIOR ===================== */
+.card-level-name{
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 820px){
+  .card-name-top-row{
+    position: relative;
+  }
+  .card-tag-inline-wrap{
+    position: absolute;
+    right: 0;
+    top: 0;
+    /* keep your existing transform vars working */
+  }
+  .card-level-name{
+    padding-right: 18px; /* a bit of leeway even if status pill is transformed away */
+  }
+}
+
+
+/* ===================== CONTRIBUTORS MOBILE FIX ===================== */
+@media (max-width: 640px){
+  .contributorsPage .roleCard{
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+  }
+  .contributorsPage .roleCardName{
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+  .contributorsPage .roleCardRole{
+    opacity: 0.8 !important;
+  }
+}
+
+@media (max-width: 640px){
+  :root{
+    /* Less empty space above the logo on mobile */
+    --home-pad-top: 64px;
+    --home-logo-mt: 0px;
+    --home-logo-ml: 0px;
+  }
 }

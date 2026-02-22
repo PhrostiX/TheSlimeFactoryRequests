@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import AdminButton from "./AdminButton";
 
 type Tab = {
   name: string;
@@ -61,6 +62,9 @@ export default function TabNav() {
               </Link>
             );
           })}
+          <div className="adminNavItem">
+            <AdminButton />
+          </div>
         </nav>
       </div>
 
@@ -98,6 +102,16 @@ export default function TabNav() {
         .brand:hover {
           transform: translateY(-1px);
           filter: brightness(1.06);
+        }
+
+        .navLinks {
+          position: relative;
+        }
+
+        .adminNavItem {
+          margin-left: 6px;
+          display: flex;
+          align-items: center;
         }
 
         .navLinks {

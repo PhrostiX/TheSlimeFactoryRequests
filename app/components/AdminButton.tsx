@@ -76,22 +76,9 @@ export default function AdminButton() {
     <>
       <button
         onClick={() => setOpen(true)}
-        style={{
-          position: "fixed",
-          // Mobile-only offset is controlled via CSS var in globals.css
-          top: "var(--admin-btn-top, 14px)",
-          right: 14,
-          zIndex: 9999,
-          padding: "10px 12px",
-          borderRadius: 12,
-          fontWeight: 900,
-          letterSpacing: 0.2,
-          background: "rgba(255,255,255,0.08)",
-          border: "1px solid rgba(255,255,255,0.18)",
-          backdropFilter: "blur(10px)",
-          WebkitBackdropFilter: "blur(10px)",
-        }}
+        className={`adminPillBtn ${admin.isAdmin ? "isAdmin" : ""}`}
         aria-label="Admin login"
+        type="button"
       >
         {label}
       </button>

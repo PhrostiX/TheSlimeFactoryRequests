@@ -714,7 +714,7 @@ function RequestCard({
                 </div>
               </div>
 
-              <div style={styles.byLine} className="card-by-line">
+              <div style={styles.byLine} className="card-by-line uploaderWrap">
                 <span style={styles.byLabel}>By:</span>{" "}
                 <span
                   style={styles.byValue}
