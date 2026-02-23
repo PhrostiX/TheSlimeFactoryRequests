@@ -173,8 +173,8 @@ export default function HomePage() {
               <ActionBtn href="/search" label="Search" tone="blue" icon="search" />
               <ActionBtn href="/search?preset=sends" label="Latest Sends" tone="green" icon="rocket" />
               <ActionBtn
-                href="/search?preset=submissions"
-                label="Latest Submissions"
+                href="/search?preset=accepted"
+                label="Recently Accepted"
                 tone="purple"
                 icon="clock"
                 className="homeQuickBtn--wide"

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { MOD_PROFILES } from "@/lib/adminProfiles";
+import { ADMIN_PROFILES, getAdminProfileDef } from "@/lib/adminProfiles";
 
 type AdminState = {
   isAdmin: boolean;
@@ -14,10 +14,15 @@ export default function AdminButton() {
   const [admin, setAdmin] = useState<AdminState>({ isAdmin: false, profile: null });
   const [mounted, setMounted] = useState(false);
   const [password, setPassword] = useState("");
-  const [selectedProfile, setSelectedProfile] = useState<string>(MOD_PROFILES[0]);
+  const [selectedProfile, setSelectedProfile] = useState<string>(ADMIN_PROFILES[0]?.name || "Reviewer");
   const [error, setError] = useState<string | null>(null);
 
-  const badgeSrc = "/modbadge.png";
+  function badgeFor(name: string) {
+    const def = getAdminProfileDef(name);
+    if (!def) return "/modbadge.png";
+    if (def.badge === "dev") return "/devbadge.png";
+    return "/modbadge.png";
+  }
 
   async function refresh() {
     const res = await fetch("/api/admin/me", { cache: "no-store" });
@@ -39,6 +44,9 @@ export default function AdminButton() {
     if (!admin.profile) return "Select Profile";
     return `Admin: ${admin.profile}`;
   }, [admin.isAdmin, admin.profile]);
+
+  // Used in JSX below; define here to avoid runtime ReferenceError.
+  const badgeSrc = admin.profile ? badgeFor(admin.profile) : "/modbadge.png";
 
   async function doLogin() {
     setError(null);
@@ -234,60 +242,96 @@ export default function AdminButton() {
             ) : (
               <>
                 <p style={{ opacity: 0.82, marginTop: 14, marginBottom: 10 }}>
-                  Select your moderator profile. Actions you take on the site will be tied to this username.
+                  Select your profile. Actions you take on the site will be tied to this username.
                 </p>
 
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                    gap: 10,
-                    marginTop: 8,
-                  }}
-                >
-                  {MOD_PROFILES.map((p) => {
-                    const selected = selectedProfile === p;
-                    return (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => setSelectedProfile(p)}
+                {(() => {
+                  const devs = ADMIN_PROFILES.filter((p) => p.role !== "mod");
+                  const mods = ADMIN_PROFILES.filter((p) => p.role === "mod");
+
+                  const Section = ({
+                    title,
+                    items,
+                  }: {
+                    title: string;
+                    items: typeof ADMIN_PROFILES;
+                  }) => (
+                    <div style={{ marginTop: 10 }}>
+                      <div
                         style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 10,
-                          padding: 12,
-                          borderRadius: 16,
-                          background: selected
-                            ? "rgba(96,165,250,0.18)"
-                            : "rgba(255,255,255,0.06)",
-                          border: selected
-                            ? "1px solid rgba(96,165,250,0.42)"
-                            : "1px solid rgba(255,255,255,0.12)",
-                          boxShadow: selected
-                            ? "0 0 0 3px rgba(96,165,250,0.14)"
-                            : "none",
-                          color: "white",
-                          textAlign: "left",
+                          fontSize: 12,
+                          fontWeight: 950,
+                          opacity: 0.78,
+                          marginBottom: 8,
+                          paddingLeft: 2,
                         }}
                       >
-                        <img
-                          src={badgeSrc}
-                          alt="Moderator badge"
-                          style={{ width: 30, height: 30, objectFit: "contain" }}
-                        />
-                        <div style={{ display: "flex", flexDirection: "column" }}>
-                          <span style={{ fontWeight: 950, fontSize: 14, lineHeight: 1.1 }}>
-                            {p}
-                          </span>
-                          <span style={{ fontSize: 12, opacity: 0.75, marginTop: 2 }}>
-                            Moderator
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+                        {title}
+                      </div>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                          gap: 10,
+                        }}
+                      >
+                        {items.map((p) => {
+                          const selected = selectedProfile === p.name;
+                          return (
+                            <button
+                              key={p.name}
+                              type="button"
+                              onClick={() => setSelectedProfile(p.name)}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 10,
+                                padding: 12,
+                                borderRadius: 16,
+                                background: selected
+                                  ? "rgba(96,165,250,0.18)"
+                                  : "rgba(255,255,255,0.06)",
+                                border: selected
+                                  ? "1px solid rgba(96,165,250,0.42)"
+                                  : "1px solid rgba(255,255,255,0.12)",
+                                boxShadow: selected
+                                  ? "0 0 0 3px rgba(96,165,250,0.14)"
+                                  : "none",
+                                color: "white",
+                                textAlign: "left",
+                              }}
+                            >
+                              <img
+                                src={badgeFor(p.name)}
+                                alt="Profile badge"
+                                style={{ width: 30, height: 30, objectFit: "contain" }}
+                              />
+                              <div style={{ display: "flex", flexDirection: "column" }}>
+                                <span style={{ fontWeight: 950, fontSize: 14, lineHeight: 1.1 }}>
+                                  {p.name}
+                                </span>
+                                <span style={{ fontSize: 12, opacity: 0.75, marginTop: 2 }}>
+                                  {p.role === "dev"
+                                    ? "Owner / Dev"
+                                    : p.role === "reviewer"
+                                      ? "Reviewer"
+                                      : "Moderator"}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+
+                  return (
+                    <>
+                      <Section title="Developers" items={devs as any} />
+                      <Section title="Moderators" items={mods as any} />
+                    </>
+                  );
+                })()}
 
                 <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
                   <button

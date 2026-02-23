@@ -8,13 +8,9 @@ import { cookies } from "next/headers";
 import { getMongoClient } from "@/lib/mongo";
 import { getAdminProfileDef } from "@/lib/adminProfiles";
 
-/**
- * IMPORTANT:
- * Your Mongo documents use numeric _id (example: _id: 64)
- */
 type RequestDoc = {
   _id: number;
-  rejections?: any[];
+  seenBy?: string[];
   sync?: any;
 };
 
@@ -41,25 +37,14 @@ export async function POST(
 ) {
   try {
     const { id } = await ctx.params;
-
     const _id = Number(id);
     if (!Number.isFinite(_id)) {
       return NextResponse.json({ ok: false, error: "Invalid id" }, { status: 400 });
     }
 
-    const body = await req.json().catch(() => ({}));
-    const commentRaw = (body as any)?.comment;
-    const comment =
-      typeof commentRaw === "string" && commentRaw.trim().length
-        ? commentRaw.trim().slice(0, 500)
-        : null;
-
     const SESSION_SECRET = process.env.SESSION_SECRET;
     if (!SESSION_SECRET) {
-      return NextResponse.json(
-        { ok: false, error: "Missing SESSION_SECRET" },
-        { status: 500 }
-      );
+      return NextResponse.json({ ok: false, error: "Missing SESSION_SECRET" }, { status: 500 });
     }
 
     const store = await cookies();
@@ -71,59 +56,59 @@ export async function POST(
     const profile = store.get("admin_profile")?.value ?? null;
     const pdef = getAdminProfileDef(profile);
     if (!profile || !pdef) {
-      return NextResponse.json(
-        { ok: false, error: "Missing admin profile" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "Missing admin profile" }, { status: 400 });
     }
-    if (!pdef.permissions.canReject) {
-      return NextResponse.json(
-        { ok: false, error: "This profile cannot log rejects." },
-        { status: 403 }
-      );
+    if (!pdef.permissions.canSeen) {
+      return NextResponse.json({ ok: false, error: "This profile cannot mark seen." }, { status: 403 });
     }
 
-    const rejectId = crypto.randomUUID();
+    // Body is optional. If omitted, defaults to "see".
+    let action: "see" | "unsee" = "see";
+    try {
+      const body = await req.json();
+      const raw = String(body?.action ?? body?.mode ?? body?.type ?? "").toLowerCase().trim();
+      if (raw === "unsee" || raw === "remove" || raw === "unset") action = "unsee";
+      if (raw === "see" || raw === "mark" || raw === "set") action = "see";
+      // backward compat: { unsee: true }
+      if (body?.unsee === true) action = "unsee";
+    } catch {
+      // ignore
+    }
+
     const now = Date.now();
 
     const client = await getMongoClient();
     const db = client.db(process.env.MONGODB_DB);
     const col = db.collection<RequestDoc>("requests");
 
-    // Only append a rejection entry + mark sync pending.
-    const update = {
-      $push: {
-        rejections: {
-          id: rejectId,
-          name: profile, // profile name automatically
-          reason: comment,
-          link: null,
-          by: null,
-          date: now,
-        },
-      },
-      $set: {
-        "sync.pending": true,
-        "sync.reason": "reject",
-        "sync.rejectId": rejectId,
-        "sync.updatedAt": now,
-      },
-    };
+    const update =
+      action === "unsee"
+        ? {
+            $pull: { seenBy: profile },
+            $set: {
+              "sync.pending": true,
+              "sync.reason": "unsee",
+              "sync.updatedAt": now,
+            },
+          }
+        : {
+            $addToSet: { seenBy: profile },
+            $set: {
+              "sync.pending": true,
+              "sync.reason": "seen",
+              "sync.updatedAt": now,
+            },
+          };
 
     const result = await col.updateOne({ _id }, update as any);
-
-    if (result.matchedCount === 0) {
-      return NextResponse.json(
-        { ok: false, error: "Request not found" },
-        { status: 404 }
-      );
+    if (!result.matchedCount) {
+      return NextResponse.json({ ok: false, error: "Request not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ ok: true, rejectId });
+    return NextResponse.json({ ok: true });
   } catch (e: any) {
-    console.error("POST /api/requests/[id]/reject error:", e);
     return NextResponse.json(
-      { ok: false, error: String(e?.message ?? e) },
+      { ok: false, error: e?.message || "Unknown error" },
       { status: 500 }
     );
   }

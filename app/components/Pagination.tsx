@@ -133,6 +133,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "var(--accent)",
     color: "white",
     fontWeight: 600,
-    borderColor: "var(--accent)",
+    // Don't mix border shorthand + borderColor (React warns during rerenders)
+    border: "1px solid var(--accent)",
   },
 };

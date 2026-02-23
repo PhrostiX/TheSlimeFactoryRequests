@@ -1,10 +1,12 @@
 "use client";
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import TabNav from "../components/TabNav";
 import Pagination from "../components/Pagination";
 import Image from "next/image";
 // import page from "./page";
+import { getAdminProfileDef } from "@/lib/adminProfiles";
 
 /* =====================
    TYPES
@@ -82,6 +84,7 @@ type MongoRequest = {
   } | null;
   sends?: SendEntry[];
   rejections?: RejectionEntry[];
+  seenBy?: string[];
   gdps?: boolean;
   checkFilter?: boolean; // involved-only
   createdAt?: string; // Requested on
@@ -424,7 +427,14 @@ type Filters = {
   | "legendary"
   | "mythic"
   | "unassigned";
+  // New merged view control (drives the legacy flags below)
+  myView: "all" | "hide_seen" | "only_seen" | "only_mine" | "unchecked_only";
+  // Legacy controls kept for backwards compatibility / simpler filtering logic
   myVisibility: "all" | "hide_sent" | "hide_rejected" | "hide_both";
+  hideSeen: boolean;
+  // Extra flags needed by the new My View dropdown
+  onlySeen: boolean;
+  onlyMine: boolean;
   sort: SortKey;
 };
 
@@ -435,7 +445,11 @@ const DEFAULT_FILTERS: Filters = {
   hasVideo: "any",
   platformer: "any",
   helperRating: "any",
+  myView: "all",
   myVisibility: "all",
+  hideSeen: false,
+  onlySeen: false,
+  onlyMine: false,
   sort: "requested_desc",
 };
 
@@ -548,6 +562,75 @@ function Chip({
 }
 
 /* =====================
+   POPOVER (FILTER BAR)
+   ===================== */
+function useOutsideClick(ref: React.RefObject<HTMLElement>, onOutside: () => void, enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    function onDown(e: MouseEvent) {
+      const el = ref.current;
+      if (!el) return;
+      if (el.contains(e.target as Node)) return;
+      onOutside();
+    }
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [enabled, onOutside, ref]);
+}
+
+function Popover({
+  open,
+  onClose,
+  button,
+  children,
+  width,
+}: {
+  open: boolean;
+  onClose: () => void;
+  button: React.ReactNode;
+  children: React.ReactNode;
+  width?: number;
+}) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  useOutsideClick(ref, onClose, open);
+  return (
+    <div ref={ref} style={styles.popWrap}>
+      {button}
+      {open ? (
+        <div style={{ ...styles.popPanel, width: width ? width : undefined }} className="frosted-glass">
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FilterButton({
+  children,
+  active,
+  onClick,
+  style,
+  title,
+}: {
+  children: React.ReactNode;
+  active?: boolean;
+  onClick: () => void;
+  style?: React.CSSProperties;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      style={{ ...styles.filterBtn, ...(active ? styles.filterBtnActive : {}), ...(style || {}) }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/* =====================
    STATUS CHIP
    ===================== */
 function StatusChip({ tag }: { tag: TagKey }) {
@@ -573,14 +656,22 @@ function StatusChip({ tag }: { tag: TagKey }) {
 function RequestCard({
   r,
   showAdminActions,
+  canSend,
+  canReject,
+  canSeen,
   onLogSend,
   onLogReject,
+  onMarkSeen,
   onViewLog,
 }: {
   r: MongoRequest;
   showAdminActions: boolean;
+  canSend: boolean;
+  canReject: boolean;
+  canSeen: boolean;
   onLogSend: (requestId: string) => void;
   onLogReject: (requestId: string) => void;
+  onMarkSeen: (requestId: string) => void;
   onViewLog: (r: MongoRequest) => void;
 }) {
   const id = safeStr(r.levelId) || "—";
@@ -783,26 +874,41 @@ function RequestCard({
           {/* Admin buttons */}
           {showAdminActions ? (
             <div style={styles.sendBtnRow}>
-              <button
-                onClick={() => onLogSend(subId)}
-                style={styles.addSendPill}
-                title="Log a send from the website"
-              >
-                Add Send
-              </button>
-              <button
-                onClick={() => onLogReject(subId)}
-                style={styles.addRejectPill}
-                title="Log a reject from the website"
-              >
-                Add Reject
-              </button>
+              {canSend ? (
+                <button
+                  onClick={() => onLogSend(subId)}
+                  style={styles.addSendPill}
+                  title="Log a send from the website"
+                >
+                  Add Send
+                </button>
+              ) : null}
+
+              {canReject ? (
+                <button
+                  onClick={() => onLogReject(subId)}
+                  style={styles.addRejectPill}
+                  title="Log a reject from the website"
+                >
+                  Add Reject
+                </button>
+              ) : null}
+
+              {canSeen ? (
+                <button
+                  onClick={() => onMarkSeen(subId)}
+                  style={styles.addSeenPill}
+                  title="Hide this request from your profile (no ping)"
+                >
+                  Already Seen
+                </button>
+              ) : null}
               <button
                 onClick={() => onViewLog(r)}
                 style={styles.viewLogPill}
-                title="View send/reject log and extra question"
+                title="View details and history"
               >
-                View Log
+                View Details
               </button>
             </div>
           ) : null}
@@ -815,6 +921,537 @@ function RequestCard({
 /* =====================
    PAGE
    ===================== */
+function FilterBar({
+  filters,
+  setFilters,
+  admin,
+  canSeen,
+  clearAll,
+  setMyView,
+  toggleTag,
+  toggleDiff,
+  cycleTri,
+}: {
+  filters: Filters;
+  setFilters: React.Dispatch<React.SetStateAction<Filters>>;
+  admin: AdminState;
+  canSeen: boolean;
+  clearAll: () => void;
+  setMyView: (v: Filters["myView"]) => void;
+  toggleTag: (t: TagKey) => void;
+  toggleDiff: (d: DifficultyKey) => void;
+  cycleTri: (k: "hasVideo" | "platformer") => void;
+}) {
+  const [isMobile, setIsMobile] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [diffOpen, setDiffOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [demonExpanded, setDemonExpanded] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 720px)");
+    const apply = () => setIsMobile(!!mq.matches);
+    apply();
+    mq.addEventListener?.("change", apply);
+    return () => mq.removeEventListener?.("change", apply);
+  }, []);
+
+  const statusCount = filters.tags.length;
+  const diffCount = filters.difficulty.length;
+
+  function summaryMulti(label: string, count: number) {
+    if (!count) return label;
+    return `${label} (${count})`;
+  }
+
+  const sortSelect = (
+    <MiniSelect
+      value={filters.sort}
+      onChange={(e) => setFilters((p) => ({ ...p, sort: e.target.value as SortKey }))}
+      style={{ width: isMobile ? "100%" : 240 }}
+      aria-label="Sort"
+    >
+      <option value="requested_desc">Requested: New → Old</option>
+      <option value="requested_asc">Requested: Old → New</option>
+      <option value="lastsend_desc">Last send: New → Old</option>
+      <option value="lastsend_asc">Last send: Old → New</option>
+      <option value="sends_desc">Total sends: High → Low</option>
+      <option value="sends_asc">Total sends: Low → High</option>
+      <option value="levelid_desc">Level ID: High → Low</option>
+      <option value="levelid_asc">Level ID: Low → High</option>
+      <option value="name_asc">Level name: A → Z</option>
+      <option value="name_desc">Level name: Z → A</option>
+      <option value="uploader_asc">Uploader: A → Z</option>
+      <option value="uploader_desc">Uploader: Z → A</option>
+    </MiniSelect>
+  );
+
+  // Suggested Rating is an admin-only filter (helpers set it; mods use it).
+  const ratingSelect = admin.isAdmin && admin.profile ? (
+    <MiniSelect
+      value={filters.helperRating}
+      onChange={(e) => setFilters((p) => ({ ...p, helperRating: e.target.value as any }))}
+      style={{ width: isMobile ? "100%" : 200 }}
+      aria-label="Suggested Rating"
+      title="Helper suggested rating"
+    >
+      <option value="any">Suggested Rating: Any</option>
+      <option value="rate">Suggested Rating: Rate</option>
+      <option value="feature">Suggested Rating: Feature</option>
+      <option value="epic">Suggested Rating: Epic</option>
+      <option value="legendary">Suggested Rating: Legendary</option>
+      <option value="mythic">Suggested Rating: Mythic</option>
+    </MiniSelect>
+  ) : null;
+
+  const myViewSelect = admin.isAdmin && admin.profile ? (
+    <MiniSelect
+      value={filters.myView}
+      onChange={(e) => setMyView(e.target.value as any)}
+      style={{ width: isMobile ? "100%" : 170 }}
+      aria-label="My View"
+      title="Personal view filters for your active moderator profile"
+    >
+      <option value="all">My View: Show all</option>
+      {canSeen ? <option value="hide_seen">My View: Hide seen</option> : null}
+      {canSeen ? <option value="only_seen">My View: Only seen</option> : null}
+      <option value="only_mine">My View: Only mine</option>
+      <option value="unchecked_only">My View: Unchecked only</option>
+    </MiniSelect>
+  ) : null;
+
+  const statusMenu = (
+    <div style={{ display: "grid", gap: 6 }}>
+      <div style={styles.popTitle}>Status</div>
+      {(
+        [
+          ["pending", "Pending Review"],
+          ["sending", "Accepted"],
+          ["rated", "Rated"],
+          ["rejected", "Not Accepted"],
+        ] as Array<[TagKey, string]>
+      ).map(([k, label]) => (
+        <label key={k} style={styles.checkRow}>
+          <input
+            type="checkbox"
+            checked={filters.tags.includes(k)}
+            onChange={() => toggleTag(k)}
+            style={{ width: 16, height: 16 }}
+          />
+          <span style={{ fontWeight: 850 }}>{label}</span>
+        </label>
+      ))}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+        <button type="button" onClick={() => setFilters((p) => ({ ...p, tags: [] }))} style={styles.popMiniBtn}>
+          Clear
+        </button>
+        <button type="button" onClick={() => setStatusOpen(false)} style={styles.popMiniBtn}>
+          Done
+        </button>
+      </div>
+    </div>
+  );
+
+  
+  const difficultyMenu = (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div style={styles.popTitle}>Difficulty</div>
+
+      <div style={{ display: "grid", gap: 8 }}>
+        <button
+          type="button"
+          style={{ ...styles.barRow, ...(diffCount === 0 ? styles.barRowActive : {}) }}
+          onClick={() => {
+            setFilters((p) => ({ ...p, difficulty: [] }));
+            setDemonExpanded(false);
+          }}
+        >
+          <span style={styles.barRowText}>Any</span>
+        </button>
+
+        {(
+          [
+            ["auto", "Auto"],
+            ["easy", "Easy"],
+            ["normal", "Normal"],
+            ["hard", "Hard"],
+            ["harder", "Harder"],
+            ["insane", "Insane"],
+          ] as Array<[DifficultyKey, string]>
+        ).map(([k, label]) => (
+          <label
+            key={k}
+            style={{
+              ...styles.barRow,
+              ...(filters.difficulty.includes(k) ? styles.barRowActive : {}),
+            }}
+          >
+            <input type="checkbox" checked={filters.difficulty.includes(k)} onChange={() => toggleDiff(k)} />
+            <span style={styles.barRowText}>{label}</span>
+          </label>
+        ))}
+
+        <div
+          role="button"
+          onClick={() => setDemonExpanded((v) => !v)}
+          style={{
+            ...styles.barRow,
+            ...(filters.difficulty.some((d) => d.startsWith("demon_")) ? styles.barRowActive : {}),
+            cursor: "pointer",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+            <span style={styles.barRowText}>Demon tiers</span>
+            <span style={{ fontWeight: 900, opacity: 0.85 }}>{demonExpanded ? "▾" : "▸"}</span>
+          </div>
+        </div>
+
+        {demonExpanded ? (
+          <div style={{ display: "grid", gap: 8, paddingLeft: 4, paddingTop: 2 }}>
+            <label
+              style={{
+                ...styles.barRow,
+                ...(filters.difficulty.some((d) => d.startsWith("demon_")) ? styles.barRowActive : {}),
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={["demon_easy","demon_medium","demon_hard","demon_insane","demon_extreme"].every((k) => filters.difficulty.includes(k as any))}
+                onChange={() => toggleAllDemon()}
+              />
+              <span style={styles.barRowText}>Any Demon</span>
+            </label>
+
+            {(
+              [
+                ["demon_easy", "Easy Demon"],
+                ["demon_medium", "Medium Demon"],
+                ["demon_hard", "Hard Demon"],
+                ["demon_insane", "Insane Demon"],
+                ["demon_extreme", "Extreme Demon"],
+              ] as Array<[DifficultyKey, string]>
+            ).map(([k, label]) => (
+              <label
+                key={k}
+                style={{
+                  ...styles.barRow,
+                  ...(filters.difficulty.includes(k) ? styles.barRowActive : {}),
+                }}
+              >
+                <input type="checkbox" checked={filters.difficulty.includes(k)} onChange={() => toggleDiff(k)} />
+                <span style={styles.barRowText}>{label}</span>
+              </label>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <button type="button" onClick={() => setFilters((p) => ({ ...p, difficulty: [] }))} style={styles.popMiniBtn}>
+          Clear
+        </button>
+        <button type="button" onClick={() => setDiffOpen(false)} style={styles.popMiniBtn}>
+          Done
+        </button>
+      </div>
+    </div>
+  );
+
+  const moreMenu = (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div style={styles.popTitle}>More Filters</div>
+      <div style={{ display: "grid", gap: 8 }}>
+        <div>
+          <div style={styles.popLabel}>Video?</div>
+          <button type="button" onClick={() => cycleTri("hasVideo")} style={styles.triBtn} className="triBtn">
+            {triLabel(filters.hasVideo)}
+          </button>
+        </div>
+        <div>
+          <div style={styles.popLabel}>Platformer?</div>
+          <button type="button" onClick={() => cycleTri("platformer")} style={styles.triBtn} className="triBtn">
+            {triLabel(filters.platformer)}
+          </button>
+        </div>
+      </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <button type="button" onClick={() => setMoreOpen(false)} style={styles.popMiniBtn}>
+          Done
+        </button>
+      </div>
+    </div>
+  );
+
+  // Mobile sheet
+  const mobileSheet = sheetOpen && mounted ? createPortal((
+    <div
+      onClick={() => setSheetOpen(false)}
+      style={{ position: "fixed", inset: 0, zIndex: 11000, background: "rgba(0,0,0,0.55)" }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={styles.sheet}
+        className="frosted-glass"
+      >
+        <div style={styles.sheetHeader}>
+          <div style={{ fontWeight: 950, fontSize: 16 }}>Filters</div>
+          <button type="button" onClick={() => setSheetOpen(false)} style={styles.sheetClose}>
+            ✕
+          </button>
+        </div>
+
+        <div style={styles.sheetBody}>
+          <div style={styles.sheetGroup}>
+            <div style={styles.sheetTitle}>Status</div>
+            {(
+        [
+          ["pending", "Pending Review"],
+          ["sending", "Accepted"],
+          ["rated", "Rated"],
+          ["rejected", "Not Accepted"],
+        ] as Array<[TagKey, string]>
+      ).map(([k, label]) => (
+              <label key={k} style={styles.checkRow}>
+                <input type="checkbox" checked={filters.tags.includes(k)} onChange={() => toggleTag(k)} />
+                <span style={{ fontWeight: 850 }}>{label}</span>
+              </label>
+            ))}
+          </div>
+
+          <div style={styles.sheetGroup}>
+            <div style={styles.sheetTitle}>Difficulty</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <button
+                type="button"
+                style={{ ...styles.barRow, ...(diffCount === 0 ? styles.barRowActive : {}) }}
+                onClick={() => {
+                  setFilters((p) => ({ ...p, difficulty: [] }));
+                  setDemonExpanded(false);
+                }}
+              >
+                <span style={styles.barRowText}>Any</span>
+              </button>
+
+              {(
+                [
+                  ["auto", "Auto"],
+                  ["easy", "Easy"],
+                  ["normal", "Normal"],
+                  ["hard", "Hard"],
+                  ["harder", "Harder"],
+                  ["insane", "Insane"],
+                ] as Array<[DifficultyKey, string]>
+              ).map(([k, label]) => (
+                <label
+                  key={k}
+                  style={{
+                    ...styles.barRow,
+                    ...(filters.difficulty.includes(k) ? styles.barRowActive : {}),
+                  }}
+                >
+                  <input type="checkbox" checked={filters.difficulty.includes(k)} onChange={() => toggleDiff(k)} />
+                  <span style={styles.barRowText}>{label}</span>
+                </label>
+              ))}
+
+              <div
+                role="button"
+                onClick={() => setDemonExpanded((v) => !v)}
+                style={{
+                  ...styles.barRow,
+                  ...(filters.difficulty.some((d) => d.startsWith("demon_")) ? styles.barRowActive : {}),
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+                  <span style={styles.barRowText}>Demon tiers</span>
+                  <span style={{ fontWeight: 900, opacity: 0.85 }}>{demonExpanded ? "▾" : "▸"}</span>
+                </div>
+              </div>
+
+              {demonExpanded ? (
+                <div style={{ display: "grid", gap: 8, paddingLeft: 4, paddingTop: 2 }}>
+                  <label
+                    style={{
+                      ...styles.barRow,
+                      ...(filters.difficulty.some((d) => d.startsWith("demon_")) ? styles.barRowActive : {}),
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={[
+                        "demon_easy",
+                        "demon_medium",
+                        "demon_hard",
+                        "demon_insane",
+                        "demon_extreme",
+                      ].every((k) => filters.difficulty.includes(k as any))}
+                      onChange={() => toggleAllDemon()}
+                    />
+                    <span style={styles.barRowText}>Any Demon</span>
+                  </label>
+
+                  {(
+                    [
+                      ["demon_easy", "Easy Demon"],
+                      ["demon_medium", "Medium Demon"],
+                      ["demon_hard", "Hard Demon"],
+                      ["demon_insane", "Insane Demon"],
+                      ["demon_extreme", "Extreme Demon"],
+                    ] as Array<[DifficultyKey, string]>
+                  ).map(([k, label]) => (
+                    <label
+                      key={k}
+                      style={{
+                        ...styles.barRow,
+                        ...(filters.difficulty.includes(k) ? styles.barRowActive : {}),
+                      }}
+                    >
+                      <input type="checkbox" checked={filters.difficulty.includes(k)} onChange={() => toggleDiff(k)} />
+                      <span style={styles.barRowText}>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {ratingSelect ? (
+            <div style={styles.sheetGroup}>
+              <div style={styles.sheetTitle}>Suggested Rating</div>
+              {ratingSelect}
+            </div>
+          ) : null}
+
+          {myViewSelect ? (
+            <div style={styles.sheetGroup}>
+              <div style={styles.sheetTitle}>My View</div>
+              {myViewSelect}
+            </div>
+          ) : null}
+
+          <div style={styles.sheetGroup}>
+            <div style={styles.sheetTitle}>Advanced</div>
+            <div style={{ display: "grid", gap: 10 }}>
+              <div>
+                <div style={styles.popLabel}>Video?</div>
+                <button type="button" onClick={() => cycleTri("hasVideo")} style={styles.triBtn}>
+                  {triLabel(filters.hasVideo)}
+                </button>
+              </div>
+              <div>
+                <div style={styles.popLabel}>Platformer?</div>
+                <button type="button" onClick={() => cycleTri("platformer")} style={styles.triBtn}>
+                  {triLabel(filters.platformer)}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style={styles.sheetFooter}>
+          <button type="button" onClick={clearAll} style={styles.sheetClear}>
+            Clear
+          </button>
+          <button type="button" onClick={() => setSheetOpen(false)} style={styles.sheetApply}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  ), document.body) : null;
+
+  if (isMobile) {
+    return (
+      <>
+        <div style={styles.filterBarMobile} className="frosted-glass">
+          <div style={{ flex: "1 1 220px", minWidth: 160 }}>
+            <MiniInput
+              value={filters.text}
+              onChange={(e) => setFilters((p) => ({ ...p, text: e.target.value }))}
+              placeholder="Search…"
+              aria-label="Search"
+            />
+          </div>
+          <div style={{ flex: "1 1 220px", minWidth: 160 }}>{sortSelect}</div>
+          <button type="button" onClick={() => setSheetOpen(true)} style={styles.mobileFilterBtn}>
+            Filters ⚙
+          </button>
+          <button type="button" onClick={clearAll} style={styles.mobileClearBtn}>
+            Clear
+          </button>
+        </div>
+        {mobileSheet}
+      </>
+    );
+  }
+
+  return (
+    <div style={styles.filterBar} className="frosted-glass">
+      <div style={{ flex: 1, minWidth: 220 }}>
+        <MiniInput
+          value={filters.text}
+          onChange={(e) => setFilters((p) => ({ ...p, text: e.target.value }))}
+          placeholder="Search (ID / level / uploader)…"
+          aria-label="Search"
+        />
+      </div>
+
+      <Popover
+        open={statusOpen}
+        onClose={() => setStatusOpen(false)}
+        width={260}
+        button={
+          <FilterButton active={statusOpen || statusCount > 0} onClick={() => setStatusOpen((v) => !v)}>
+            {summaryMulti("Status", statusCount)} ▾
+          </FilterButton>
+        }
+      >
+        {statusMenu}
+      </Popover>
+
+      <Popover
+        open={diffOpen}
+        onClose={() => setDiffOpen(false)}
+        width={320}
+        button={
+          <FilterButton active={diffOpen || diffCount > 0} onClick={() => setDiffOpen((v) => !v)}>
+            {summaryMulti("Difficulty", diffCount)} ▾
+          </FilterButton>
+        }
+      >
+        {difficultyMenu}
+      </Popover>
+
+      {ratingSelect}
+      {myViewSelect}
+
+      <Popover
+        open={moreOpen}
+        onClose={() => setMoreOpen(false)}
+        width={280}
+        button={
+          <FilterButton active={moreOpen || filters.hasVideo !== "any" || filters.platformer !== "any"} onClick={() => setMoreOpen((v) => !v)}>
+            More ▾
+          </FilterButton>
+        }
+      >
+        {moreMenu}
+      </Popover>
+
+      <div style={{ width: 240 }}>{sortSelect}</div>
+
+      <button type="button" onClick={clearAll} style={styles.clearBtn} className="clearBtn">
+        Clear
+      </button>
+    </div>
+  );
+}
+
 export default function SearchPage() {
   const [rows, setRows] = useState<MongoRequest[]>([]);
   const [loading, setLoading] = useState(false);
@@ -831,7 +1468,52 @@ export default function SearchPage() {
       .catch(() => { });
   }, []);
 
+  const profileDef = useMemo(() => getAdminProfileDef(admin.profile), [admin.profile]);
+  const canSend = !!profileDef?.permissions.canSend;
+  const canReject = !!profileDef?.permissions.canReject;
+  const canSeen = !!profileDef?.permissions.canSeen;
+  const canViewDetails = !!profileDef?.permissions.canViewDetails;
+
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+
+  // Persist the Hide Seen toggle per active admin profile
+  useEffect(() => {
+    if (!admin.isAdmin || !admin.profile) return;
+    try {
+      const key = `slime_hideSeen:${admin.profile}`;
+      const raw = window.localStorage.getItem(key);
+      if (raw === "1" || raw === "true") {
+        setFilters((p) => ({
+          ...p,
+          hideSeen: true,
+          // Only update the view mode if user hasn't picked a different one
+          myView: p.myView === "all" || p.myView === "hide_seen" ? "hide_seen" : p.myView,
+          onlySeen: p.onlySeen ?? false,
+          onlyMine: p.onlyMine ?? false,
+        }));
+      }
+      if (raw === "0" || raw === "false") {
+        setFilters((p) => ({
+          ...p,
+          hideSeen: false,
+          myView: p.myView === "hide_seen" ? "all" : p.myView,
+        }));
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [admin.isAdmin, admin.profile]);
+
+  useEffect(() => {
+    if (!admin.isAdmin || !admin.profile) return;
+    try {
+      const key = `slime_hideSeen:${admin.profile}`;
+      window.localStorage.setItem(key, filters.hideSeen ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [admin.isAdmin, admin.profile, filters.hideSeen]);
 
   const RATINGS = ["send-only", "feature", "epic", "legendary", "mythic"] as const;
   type Rating = (typeof RATINGS)[number];
@@ -853,6 +1535,12 @@ export default function SearchPage() {
   const [rejectComment, setRejectComment] = useState<string>("");
   const [rejectSubmitting, setRejectSubmitting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
+
+  const [seenModalOpen, setSeenModalOpen] = useState(false);
+  const [seenTargetId, setSeenTargetId] = useState<string | null>(null);
+  const [seenUnsee, setSeenUnsee] = useState(false);
+  const [seenSubmitting, setSeenSubmitting] = useState(false);
+  const [seenError, setSeenError] = useState<string | null>(null);
 
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [logTarget, setLogTarget] = useState<MongoRequest | null>(null);
@@ -877,6 +1565,54 @@ export default function SearchPage() {
     setLogModalOpen(true);
   }
 
+  function openSeenModal(requestId: string) {
+    setSeenTargetId(requestId);
+    setSeenError(null);
+
+    // Default behavior:
+    // - If you've already marked it seen, default checkbox to "Unsee".
+    // - Otherwise default to marking seen.
+    const mine = admin.profile ?? "";
+    const target = rows.find((r) => String(r._id) === String(requestId));
+    const isSeen =
+      !!mine && !!target && Array.isArray((target as any).seenBy) && (target as any).seenBy.includes(mine);
+    setSeenUnsee(isSeen);
+    setSeenModalOpen(true);
+  }
+
+  async function submitSeen() {
+    if (!seenTargetId) return;
+    setSeenSubmitting(true);
+    setSeenError(null);
+    try {
+      const res = await fetch(`/api/requests/${encodeURIComponent(seenTargetId)}/seen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: seenUnsee ? "unsee" : "see" }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || data?.ok === false) {
+        setSeenError(data?.error || "Failed to update seen state.");
+        return;
+      }
+
+      setSeenModalOpen(false);
+      await fetchRows();
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("toast", {
+            detail: seenUnsee ? "Removed from Seen By" : "Marked as Seen",
+          })
+        );
+      }
+    } catch (e: any) {
+      setSeenError(String(e?.message ?? e));
+    } finally {
+      setSeenSubmitting(false);
+    }
+  }
+
   async function submitSend() {
     if (!sendTargetId) return;
     setSendSubmitting(true);
@@ -899,6 +1635,10 @@ export default function SearchPage() {
 
       setSendModalOpen(false);
       await fetchRows();
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("toast", { detail: "Send logged" }));
+      }
     } catch (e: any) {
       setSendError(String(e?.message ?? e));
     } finally {
@@ -928,14 +1668,16 @@ export default function SearchPage() {
 
       setRejectModalOpen(false);
       await fetchRows();
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("toast", { detail: "Reject logged" }));
+      }
     } catch (e: any) {
       setRejectError(String(e?.message ?? e));
     } finally {
       setRejectSubmitting(false);
     }
   }
-
-  const [showFilters, setShowFilters] = useState(false);
 
   // Preset shortcuts (used by the Home page buttons and legacy routes)
   const searchParams = useSearchParams();
@@ -951,13 +1693,16 @@ export default function SearchPage() {
         ...DEFAULT_FILTERS,
         sort: "lastsend_desc",
       });
-      setShowFilters(false);
       return;
     }
 
     if (preset === "submissions") {
       setFilters({ ...DEFAULT_FILTERS, sort: "requested_desc" });
-      setShowFilters(false);
+      return;
+    }
+
+    if (preset === "accepted") {
+      setFilters({ ...DEFAULT_FILTERS, tags: ["sending"], sort: "requested_desc" });
       return;
     }
   }, [preset]);
@@ -1050,18 +1795,29 @@ export default function SearchPage() {
     const diffs = new Set(filters.difficulty);
 
     let list = computed.filter((x) => {
-      // Admin-only: hide levels the current mod has already sent/rejected
-      if (admin.isAdmin && admin.profile && filters.myVisibility !== "all") {
+      // Admin-only: Seen / Mine logic
+      if (admin.isAdmin && admin.profile) {
         const p = admin.profile;
-        const mySent =
-          Array.isArray(x.r.sends) && x.r.sends.some((s) => safeStr((s as any)?.by) === p);
+        const seen = Array.isArray(x.r.seenBy) && x.r.seenBy.includes(p);
+        const mySent = Array.isArray(x.r.sends) && x.r.sends.some((s) => safeStr((s as any)?.by) === p);
         const myRej =
-          Array.isArray(x.r.rejections) &&
-          x.r.rejections.some((rr) => safeStr((rr as any)?.name) === p);
+          Array.isArray(x.r.rejections) && x.r.rejections.some((rr) => safeStr((rr as any)?.name) === p);
+        const mine = mySent || myRej;
 
-        if (filters.myVisibility === "hide_sent" && mySent) return false;
-        if (filters.myVisibility === "hide_rejected" && myRej) return false;
-        if (filters.myVisibility === "hide_both" && (mySent || myRej)) return false;
+        // Hide seen
+        if (canSeen && filters.hideSeen && seen) return false;
+        // Only seen
+        if (canSeen && filters.onlySeen && !seen) return false;
+
+        // Only mine
+        if (filters.onlyMine && !mine) return false;
+
+        // Legacy: hide levels the current mod has already sent/rejected
+        if (filters.myVisibility !== "all") {
+          if (filters.myVisibility === "hide_sent" && mySent) return false;
+          if (filters.myVisibility === "hide_rejected" && myRej) return false;
+          if (filters.myVisibility === "hide_both" && mine) return false;
+        }
       }
 
       if (text) {
@@ -1131,7 +1887,7 @@ export default function SearchPage() {
     });
 
     return list;
-  }, [computed, filters, admin.isAdmin, admin.profile]);
+  }, [computed, filters, admin.isAdmin, admin.profile, canSeen]);
 
   const total = filtered.length;
   const totalPages = Math.max(1, Math.ceil(total / limit));
@@ -1161,11 +1917,51 @@ export default function SearchPage() {
     });
   }
 
+
+  function toggleAllDemon() {
+    const demonKeys: DifficultyKey[] = ["demon_easy", "demon_medium", "demon_hard", "demon_insane", "demon_extreme"];
+    setFilters((p) => {
+      const set = new Set(p.difficulty);
+      const hasAny = demonKeys.some((k) => set.has(k));
+      if (hasAny) {
+        demonKeys.forEach((k) => set.delete(k));
+      } else {
+        demonKeys.forEach((k) => set.add(k));
+      }
+      return { ...p, difficulty: Array.from(set) };
+    });
+  }
+
+
   function cycleTri(key: "hasVideo" | "platformer") {
     setFilters((p) => {
       const cur = p[key];
       const next: Tri = cur === "any" ? "yes" : cur === "yes" ? "no" : "any";
       return { ...p, [key]: next };
+    });
+  }
+
+  function setMyView(next: Filters["myView"]) {
+    setFilters((p) => {
+      // Defaults
+      let hideSeen = false;
+      let onlySeen = false;
+      let onlyMine = false;
+      let myVisibility: Filters["myVisibility"] = "all";
+
+      if (next === "hide_seen") hideSeen = true;
+      if (next === "only_seen") onlySeen = true;
+      if (next === "only_mine") onlyMine = true;
+      if (next === "unchecked_only") myVisibility = "hide_both";
+
+      return {
+        ...p,
+        myView: next,
+        hideSeen,
+        onlySeen,
+        onlyMine,
+        myVisibility,
+      };
     });
   }
 
@@ -1198,197 +1994,18 @@ export default function SearchPage() {
             </p>
           </div>
 
-          <div style={styles.searchBarRow} className="frosted-glass">
-            <div style={styles.searchLeft}>
-              <Label>Search (ID / level name / uploader)</Label>
-              <MiniInput
-                value={filters.text}
-                onChange={(e) => setFilters((p) => ({ ...p, text: e.target.value }))}
-                placeholder="Try: 87284332, Epilogue, baberich..."
-              />
-            </div>
-            <div style={styles.searchRight}>
-              <Label>Sort</Label>
-              <MiniSelect
-                value={filters.sort}
-                onChange={(e) => setFilters((p) => ({ ...p, sort: e.target.value as SortKey }))}
-              >
-                <option value="requested_desc">Requested (Newest → Oldest)</option>
-                <option value="requested_asc">Requested (Oldest → Newest)</option>
-                <option value="lastsend_desc">Last send (Newest → Oldest)</option>
-                <option value="lastsend_asc">Last send (Oldest → Newest)</option>
-                <option value="sends_desc">Total sends (High → Low)</option>
-                <option value="sends_asc">Total sends (Low → High)</option>
-                <option value="levelid_desc">Level ID (High → Low)</option>
-                <option value="levelid_asc">Level ID (Low → High)</option>
-                <option value="name_asc">Level name (A → Z)</option>
-                <option value="name_desc">Level name (Z → A)</option>
-                <option value="uploader_asc">Uploader (A → Z)</option>
-                <option value="uploader_desc">Uploader (Z → A)</option>
-                <option value="stars_desc">Stars/Moons (High → Low)</option>
-                <option value="stars_asc">Stars/Moons (Low → High)</option>
-              </MiniSelect>
-
-              <button
-                type="button"
-                onClick={() => setShowFilters((v) => !v)}
-                style={styles.filterToggle}
-                className="filterToggle"
-              >
-                {showFilters ? "Hide filters" : "Show filters"}
-              </button>
-
-              <button type="button" onClick={clearAll} style={styles.clearBtn} className="clearBtn">
-                Clear
-              </button>
-            </div>
-          </div>
-
-          {showFilters ? (
-            <div style={styles.filterPanel} className="frosted-glass">
-              <FieldRow>
-                <div style={{ flex: 1, minWidth: 260 }}>
-                  <SectionTitle>Tags</SectionTitle>
-                  <div style={styles.chipRow}>
-                    <Chip
-                      active={filters.tags.includes("pending")}
-                      label="Pending Review"
-                      onClick={() => toggleTag("pending")}
-                    />
-                    <Chip
-                      active={filters.tags.includes("sending")}
-                      label="Accepted"
-                      onClick={() => toggleTag("sending")}
-                    />
-                    <Chip
-                      active={filters.tags.includes("rated")}
-                      label="Rated"
-                      onClick={() => toggleTag("rated")}
-                    />
-                    <Chip
-                      active={filters.tags.includes("rejected")}
-                      label="Not Accepted"
-                      onClick={() => toggleTag("rejected")}
-                    />
-                    <Chip
-                      active={filters.tags.includes("stolen")}
-                      label="Stolen"
-                      onClick={() => toggleTag("stolen")}
-                    />
-                    <Chip active={filters.tags.includes("dne")} label="DNE" onClick={() => toggleTag("dne")} />
-                  </div>
-                </div>
-
-                <div style={{ width: 280, minWidth: 240 }}>
-                  <SectionTitle>Suggested Rating</SectionTitle>
-                  <MiniSelect
-                    value={filters.helperRating}
-                    onChange={(e) =>
-                      setFilters((p) => ({
-                        ...p,
-                        helperRating: e.target.value as any,
-                      }))
-                    }
-                  >
-                    <option value="any">Any</option>
-                    <option value="rate">Rate</option>
-                    <option value="feature">Feature</option>
-                    <option value="epic">Epic</option>
-                    <option value="legendary">Legendary</option>
-                    <option value="mythic">Mythic</option>
-                    <option value="unassigned">Unassigned (legacy)</option>
-                  </MiniSelect>
-
-                  <SectionTitle>Video?</SectionTitle>
-                  <button type="button" onClick={() => cycleTri("hasVideo")} style={styles.triBtn} className="triBtn">
-                    {triLabel(filters.hasVideo)}
-                  </button>
-
-                  <SectionTitle style={{ marginTop: 12 }}>Platformer?</SectionTitle>
-                  <button
-                    type="button"
-                    onClick={() => cycleTri("platformer")}
-                    style={styles.triBtn}
-                    className="triBtn"
-                  >
-                    {triLabel(filters.platformer)}
-                  </button>
-
-                  {admin.isAdmin && admin.profile ? (
-                    <>
-                      <SectionTitle style={{ marginTop: 12 }}>My checked filter</SectionTitle>
-                      <MiniSelect
-                        value={filters.myVisibility}
-                        onChange={(e) =>
-                          setFilters((p) => ({
-                            ...p,
-                            myVisibility: e.target.value as any,
-                          }))
-                        }
-                        title="Hide entries where your moderator profile appears in sends/rejections"
-                      >
-                        <option value="all">Show all</option>
-                        <option value="hide_sent">Hide my sent</option>
-                        <option value="hide_rejected">Hide my rejected</option>
-                        <option value="hide_both">Hide both</option>
-                      </MiniSelect>
-                    </>
-                  ) : null}
-                </div>
-              </FieldRow>
-
-              <FieldRow>
-                <div style={{ flex: 1, minWidth: 260 }}>
-                  <SectionTitle>Difficulty</SectionTitle>
-                  <div style={styles.chipRow}>
-                    <Chip active={filters.difficulty.includes("auto")} label="Auto" onClick={() => toggleDiff("auto")} />
-                    <Chip active={filters.difficulty.includes("easy")} label="Easy" onClick={() => toggleDiff("easy")} />
-                    <Chip
-                      active={filters.difficulty.includes("normal")}
-                      label="Normal"
-                      onClick={() => toggleDiff("normal")}
-                    />
-                    <Chip active={filters.difficulty.includes("hard")} label="Hard" onClick={() => toggleDiff("hard")} />
-                    <Chip
-                      active={filters.difficulty.includes("harder")}
-                      label="Harder"
-                      onClick={() => toggleDiff("harder")}
-                    />
-                    <Chip
-                      active={filters.difficulty.includes("insane")}
-                      label="Insane"
-                      onClick={() => toggleDiff("insane")}
-                    />
-                    <Chip
-                      active={filters.difficulty.includes("demon_easy")}
-                      label="Easy Demon"
-                      onClick={() => toggleDiff("demon_easy")}
-                    />
-                    <Chip
-                      active={filters.difficulty.includes("demon_medium")}
-                      label="Medium Demon"
-                      onClick={() => toggleDiff("demon_medium")}
-                    />
-                    <Chip
-                      active={filters.difficulty.includes("demon_hard")}
-                      label="Hard Demon"
-                      onClick={() => toggleDiff("demon_hard")}
-                    />
-                    <Chip
-                      active={filters.difficulty.includes("demon_insane")}
-                      label="Insane Demon"
-                      onClick={() => toggleDiff("demon_insane")}
-                    />
-                    <Chip
-                      active={filters.difficulty.includes("demon_extreme")}
-                      label="Extreme Demon"
-                      onClick={() => toggleDiff("demon_extreme")}
-                    />
-                  </div>
-                </div>
-              </FieldRow>
-            </div>
-          ) : null}
+          {/* Modern filter bar (desktop) */}
+          <FilterBar
+            filters={filters}
+            setFilters={setFilters}
+            admin={admin}
+            canSeen={canSeen}
+            clearAll={clearAll}
+            setMyView={setMyView}
+            toggleTag={toggleTag}
+            toggleDiff={toggleDiff}
+            cycleTri={cycleTri}
+          />
 
           <div style={styles.statsRow}>
             <div style={styles.statsText}>
@@ -1407,9 +2024,13 @@ export default function SearchPage() {
                 <div key={key} style={{ animationDelay: `${i * 0.05}s` }} className="animate-slide-in-up">
                   <RequestCard
                     r={r}
-                    showAdminActions={admin.isAdmin && !!admin.profile}
+                    showAdminActions={admin.isAdmin && !!admin.profile && !!profileDef && canViewDetails}
+                    canSend={canSend}
+                    canReject={canReject}
+                    canSeen={canSeen}
                     onLogSend={openSendModal}
                     onLogReject={openRejectModal}
+                    onMarkSeen={openSeenModal}
                     onViewLog={openLogModal}
                   />
                 </div>
@@ -1604,6 +2225,92 @@ export default function SearchPage() {
           </div>
         )}
 
+        {seenModalOpen && (
+          <div
+            onClick={() => setSeenModalOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 10000,
+              background: "rgba(0,0,0,0.6)",
+              display: "grid",
+              placeItems: "center",
+              padding: 16,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "min(520px, 100%)",
+                borderRadius: 16,
+                padding: 16,
+                background: "rgba(20,20,20,0.95)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                boxShadow: "0 12px 40px rgba(0,0,0,0.45)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>Confirm Seen</h3>
+                <button onClick={() => setSeenModalOpen(false)} style={{ opacity: 0.8 }}>
+                  ✕
+                </button>
+              </div>
+
+              <p style={{ opacity: 0.82, marginTop: 10, lineHeight: 1.35 }}>
+                Profile: <b>{admin.profile ?? "—"}</b>
+                <br />
+                This updates the request silently (no pings) and will only be hidden when your <b>Hide Seen</b> filter
+                is enabled.
+              </p>
+
+              <label
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "center",
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  background: "#0f1020",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  userSelect: "none",
+                  marginTop: 10,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={!!seenUnsee}
+                  onChange={(e) => setSeenUnsee(e.target.checked)}
+                  style={{ width: 18, height: 18 }}
+                />
+                <span style={{ opacity: 0.92, fontWeight: 800 }}>
+                  Unsee (remove my name from Seen By)
+                </span>
+              </label>
+
+              <button
+                onClick={submitSeen}
+                disabled={seenSubmitting}
+                style={{
+                  marginTop: 12,
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  fontWeight: 900,
+                  background: "rgba(234, 179, 8, 0.22)",
+                  border: "1px solid rgba(234, 179, 8, 0.35)",
+                  color: "white",
+                  cursor: "pointer",
+                  opacity: seenSubmitting ? 0.7 : 1,
+                  width: "100%",
+                }}
+              >
+                {seenSubmitting ? "Working…" : seenUnsee ? "Confirm Unsee" : "Confirm Seen"}
+              </button>
+
+              {seenError && <p style={{ marginTop: 10, color: "tomato", fontWeight: 700 }}>{seenError}</p>}
+            </div>
+          </div>
+        )}
+
         {logModalOpen && logTarget && (
           <div
             onClick={() => setLogModalOpen(false)}
@@ -1662,6 +2369,28 @@ export default function SearchPage() {
                             • {safeStr((s as any)?.by) || "—"}
                           </div>
                         ))}
+                    </div>
+                  ) : (
+                    <div style={{ opacity: 0.75 }}>—</div>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    borderRadius: 14,
+                    padding: 12,
+                    border: "1px solid rgba(255,255,255,0.10)",
+                    background: "rgba(255,255,255,0.04)",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, marginBottom: 8 }}>Seen By</div>
+                  {Array.isArray(logTarget.seenBy) && logTarget.seenBy.length ? (
+                    <div style={{ display: "grid", gap: 6 }}>
+                      {logTarget.seenBy.map((n, idx) => (
+                        <div key={`${n}-${idx}`} style={{ opacity: 0.9 }}>
+                          • {safeStr(n) || "—"}
+                        </div>
+                      ))}
                     </div>
                   ) : (
                     <div style={{ opacity: 0.75 }}>—</div>
@@ -1961,6 +2690,205 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "flex-end",
     justifyContent: "space-between",
   },
+  // New modern filter bar
+  filterBar: {
+    position: "relative",
+    zIndex: 200000,
+    borderRadius: 18,
+    padding: "12px 12px",
+    border: "1px solid rgba(255,255,255,0.10)",
+    marginBottom: 18,
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+    alignItems: "center",
+  },
+  filterBarMobile: {
+    position: "relative",
+    zIndex: 200000,
+    borderRadius: 18,
+    padding: "12px 12px",
+    border: "1px solid rgba(255,255,255,0.10)",
+    marginBottom: 18,
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+    alignItems: "center",
+  },
+  filterBtn: {
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "linear-gradient(135deg, rgba(59,130,246,0.10), rgba(168,85,247,0.08))",
+    color: "var(--foreground)",
+    borderRadius: 12,
+    padding: "10px 12px",
+    fontWeight: 950,
+    cursor: "pointer",
+    transition: "all 180ms ease",
+    whiteSpace: "nowrap",
+  },
+  filterBtnActive: {
+    background: "linear-gradient(135deg, rgba(59,130,246,0.18), rgba(168,85,247,0.14))",
+    border: "1px solid rgba(255,255,255,0.22)",
+    boxShadow: "0 10px 22px rgba(0,0,0,0.22)",
+  },
+  popWrap: { position: "relative" },
+  popPanel: {
+    position: "absolute",
+    top: "calc(100% + 8px)",
+    left: 0,
+    zIndex: 300000,
+    borderRadius: 16,
+    padding: 12,
+    border: "1px solid rgba(255,255,255,0.12)",
+    boxShadow: "0 18px 50px rgba(0,0,0,0.45)",
+    background: "linear-gradient(180deg, #121327 0%, #090910 100%)",
+    backdropFilter: "none",
+  },
+  popTitle: { fontSize: 12, fontWeight: 950, opacity: 0.92 },
+  popLabel: { fontSize: 12, fontWeight: 900, opacity: 0.8, marginBottom: 6 },
+  popMiniBtn: {
+    padding: "8px 10px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.08)",
+    color: "var(--foreground)",
+    fontWeight: 950,
+    cursor: "pointer",
+  },
+  barRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "#0f1020",
+    boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.04)",
+    cursor: "pointer",
+  },
+  barRowActive: {
+    border: "1px solid rgba(96,165,250,0.55)",
+    background: "linear-gradient(180deg, rgba(96,165,250,0.20) 0%, rgba(147,197,253,0.10) 100%)",
+  },
+  barRowText: { fontWeight: 900, letterSpacing: 0.1 },
+
+
+  checkRow: {
+    display: "flex",
+    gap: 10,
+    alignItems: "center",
+    padding: "8px 10px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.05)",
+    userSelect: "none",
+  },
+  segmentRow: {
+    display: "flex",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  segmentBtn: {
+    padding: "8px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "#0f1020",
+    color: "var(--foreground)",
+    fontWeight: 950,
+    cursor: "pointer",
+  },
+  segmentBtnActive: {
+    background: "linear-gradient(135deg, rgba(59,130,246,0.22), rgba(168,85,247,0.16))",
+    border: "1px solid rgba(255,255,255,0.20)",
+  },
+  mobileFilterBtn: {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "linear-gradient(135deg, rgba(59,130,246,0.16), rgba(168,85,247,0.12))",
+    color: "var(--foreground)",
+    fontWeight: 950,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  mobileClearBtn: {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.08)",
+    color: "var(--foreground)",
+    fontWeight: 950,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  sheet: {
+    position: "fixed",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 11001,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "linear-gradient(180deg, #121327 0%, #07070c 100%)",
+    backdropFilter: "none",
+    boxShadow: "0 -18px 50px rgba(0,0,0,0.55)",
+    maxHeight: "82vh",
+    display: "grid",
+    gridTemplateRows: "auto 1fr auto",
+    paddingBottom: "env(safe-area-inset-bottom)",
+  },
+  sheetHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "14px 16px",
+    borderBottom: "1px solid rgba(255,255,255,0.10)",
+  },
+  sheetClose: {
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.08)",
+    color: "var(--foreground)",
+    borderRadius: 12,
+    padding: "6px 10px",
+    fontWeight: 950,
+    cursor: "pointer",
+  },
+  sheetBody: { padding: 14, overflowY: "auto", display: "grid", gap: 14 },
+  sheetGroup: {
+    borderRadius: 16,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.05)",
+    padding: 12,
+  },
+  sheetTitle: { fontSize: 12, fontWeight: 950, opacity: 0.92, marginBottom: 10 },
+  sheetFooter: {
+    display: "flex",
+    gap: 10,
+    justifyContent: "flex-end",
+    padding: "14px 16px",
+    paddingBottom: "max(14px, env(safe-area-inset-bottom))",
+    borderTop: "1px solid rgba(255,255,255,0.10)",
+  },
+  sheetClear: {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.08)",
+    color: "var(--foreground)",
+    fontWeight: 950,
+    cursor: "pointer",
+  },
+  sheetApply: {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "linear-gradient(135deg, rgba(59,130,246,0.20), rgba(168,85,247,0.16))",
+    color: "var(--foreground)",
+    fontWeight: 950,
+    cursor: "pointer",
+  },
   searchLeft: { flex: 1, minWidth: 220 },
   searchRight: {
     display: "flex",
@@ -2019,7 +2947,7 @@ const styles: Record<string, React.CSSProperties> = {
   chipRow: { display: "flex", flexWrap: "wrap", gap: 6 },
   chip: {
     border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.06)",
+    background: "#0f1020",
     color: "var(--foreground)",
     borderRadius: 999,
     padding: "8px 12px",
@@ -2039,7 +2967,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "12px 14px",
     borderRadius: 12,
     border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.06)",
+    background: "#0f1020",
     color: "var(--foreground)",
     fontWeight: 900,
     cursor: "pointer",
@@ -2321,6 +3249,19 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     border: "1px solid rgba(239,68,68,0.35)",
     background: "rgba(239,68,68,0.16)",
+    color: "white",
+    boxShadow: "0 10px 28px rgba(0,0,0,0.35)",
+    transition: "transform 120ms ease, filter 120ms ease",
+  },
+
+  addSeenPill: {
+    padding: "10px 14px",
+    borderRadius: 999,
+    fontWeight: 950,
+    fontSize: 13,
+    cursor: "pointer",
+    border: "1px solid rgba(250,204,21,0.40)",
+    background: "rgba(250,204,21,0.16)",
     color: "white",
     boxShadow: "0 10px 28px rgba(0,0,0,0.35)",
     transition: "transform 120ms ease, filter 120ms ease",

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { MOD_PROFILES } from "@/lib/adminProfiles";
+import { ADMIN_PROFILE_NAMES } from "@/lib/adminProfiles";
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({} as any));
   const profile = String((body as any)?.profile ?? "");
 
-  if (!MOD_PROFILES.includes(profile as any)) {
+  if (!ADMIN_PROFILE_NAMES.includes(profile as any)) {
     return NextResponse.json({ ok: false, error: "Invalid profile" }, { status: 400 });
   }
 

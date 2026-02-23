@@ -3,16 +3,17 @@
 import React from "react";
 import TabNav from "../components/TabNav";
 import Image from "next/image";
-import { MOD_PROFILES } from "@/lib/adminProfiles";
+import { ADMIN_PROFILES } from "@/lib/adminProfiles";
 
 type Person = {
   name: string;
   title: string;
-  badge: "dev" | "mod";
+  badge: "dev" | "mod" | "reviewer";
 };
 
 const DEV_BADGE = "/devbadge.png";
 const MOD_BADGE = "/modbadge.png";
+const REVIEWER_BADGE = "/modbadge.png";
 
 export default function ContributorsPage() {
   const coreTeam: Person[] = [
@@ -22,8 +23,8 @@ export default function ContributorsPage() {
 
   const owners: Person[] = [{ name: "dkirinor", title: "Server Owner", badge: "dev" }];
 
-  const mods: Person[] = MOD_PROFILES.map((name) => ({
-    name,
+  const mods: Person[] = ADMIN_PROFILES.filter((p) => p.role === "mod").map((p) => ({
+    name: p.name,
     title: "Moderator",
     badge: "mod",
   }));
@@ -112,7 +113,7 @@ function SectionHeader({ title, hint }: { title: string; hint: string }) {
 }
 
 function RoleCard({ person }: { person: Person }) {
-  const badgeSrc = person.badge === "dev" ? DEV_BADGE : MOD_BADGE;
+  const badgeSrc = person.badge === "dev" ? DEV_BADGE : person.badge === "reviewer" ? REVIEWER_BADGE : MOD_BADGE;
 
   return (
     <div style={styles.card} className="frosted-glass roleCard">

@@ -6,7 +6,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import crypto from "crypto";
 import { cookies } from "next/headers";
 import { getMongoClient } from "@/lib/mongo";
-import { MOD_PROFILES } from "@/app/lib/adminProfiles";
+import { getAdminProfileDef } from "@/lib/adminProfiles";
 
 type Rating = "rate" | "feature" | "epic" | "legendary" | "mythic";
 
@@ -100,10 +100,17 @@ export async function POST(
     }
 
     const profile = store.get("admin_profile")?.value ?? null;
-    if (!profile || !MOD_PROFILES.includes(profile as any)) {
+    const pdef = getAdminProfileDef(profile);
+    if (!profile || !pdef) {
       return NextResponse.json(
         { ok: false, error: "Missing admin profile" },
         { status: 400 }
+      );
+    }
+    if (!pdef.permissions.canSend) {
+      return NextResponse.json(
+        { ok: false, error: "This profile cannot log sends." },
+        { status: 403 }
       );
     }
 
