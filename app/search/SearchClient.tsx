@@ -967,6 +967,19 @@ function FilterBar({
   const statusCount = filters.tags.length;
   const diffCount = filters.difficulty.length;
 
+  const DEMON_KEYS: DifficultyKey[] = ["demon_easy","demon_medium","demon_hard","demon_insane","demon_extreme"];
+
+  function toggleAllDemon() {
+    setFilters((p) => {
+      const current = Array.isArray(p.difficulty) ? p.difficulty : [];
+      const hasAll = DEMON_KEYS.every((k) => current.includes(k));
+      const next = hasAll
+        ? current.filter((k) => !DEMON_KEYS.includes(k))
+        : Array.from(new Set([...current, ...DEMON_KEYS]));
+      return { ...p, difficulty: next };
+    });
+  }
+
   function summaryMulti(label: string, count: number) {
     if (!count) return label;
     return `${label} (${count})`;
