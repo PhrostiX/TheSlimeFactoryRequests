@@ -2710,7 +2710,8 @@ const styles: Record<string, React.CSSProperties> = {
   // New modern filter bar
   filterBar: {
     position: "relative",
-    zIndex: 200000,
+    // Keep filter controls above cards, but below modals/menus.
+    zIndex: 2000,
     borderRadius: 18,
     padding: "12px 12px",
     border: "1px solid rgba(255,255,255,0.10)",
@@ -2722,7 +2723,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   filterBarMobile: {
     position: "relative",
-    zIndex: 200000,
+    // Keep filter controls above cards, but below modals/menus.
+    zIndex: 2000,
     borderRadius: 18,
     padding: "12px 12px",
     border: "1px solid rgba(255,255,255,0.10)",
@@ -2753,7 +2755,8 @@ const styles: Record<string, React.CSSProperties> = {
     position: "absolute",
     top: "calc(100% + 8px)",
     left: 0,
-    zIndex: 300000,
+    // Popovers above the filter bar, but still below app modals.
+    zIndex: 3000,
     borderRadius: 16,
     padding: 12,
     border: "1px solid rgba(255,255,255,0.12)",
