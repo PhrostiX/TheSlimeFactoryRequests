@@ -564,7 +564,11 @@ function Chip({
 /* =====================
    POPOVER (FILTER BAR)
    ===================== */
-function useOutsideClick(ref: React.RefObject<HTMLElement>, onOutside: () => void, enabled: boolean) {
+function useOutsideClick<T extends HTMLElement>(
+  ref: React.RefObject<T | null>,
+  onOutside: () => void,
+  enabled: boolean
+) {
   useEffect(() => {
     if (!enabled) return;
     function onDown(e: MouseEvent) {
