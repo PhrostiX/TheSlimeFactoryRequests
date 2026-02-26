@@ -22,6 +22,7 @@ type MongoRequest = {
   status?: "pending" | "sending" | "rated" | "rejected" | "stolen" | "dne";
   sendCount?: number;
   sends?: any[];
+  sendNames?: string[];
 };
 
 type TagKey = "pending" | "sending" | "rated" | "rejected" | "stolen" | "dne";
@@ -64,17 +65,50 @@ function statusFromRequest(r: MongoRequest): TagKey {
 }
 
 function isAccepted(r: MongoRequest): boolean {
-  // "Accepted" = has been sent at least once
-  if (typeof r.sendCount === "number" && r.sendCount > 0) return true;
-  if (Array.isArray(r.sends) && r.sends.length > 0) return true;
+  // "Accepted" on the homepage = internal status "sending" only.
+  return String(r.status ?? "").toLowerCase() === "sending";
+}
 
-  // fallback: some schemas mark "sending" via review types
-  const rev = latestReview(r);
-  if (!rev) return false;
-  const t = Number(rev.type);
-  if (t > 0) return true;
-  if (t === -2) return true;
-  return false;
+function uniqueSendersForRequest(r: MongoRequest): string[] {
+  const set = new Set<string>();
+
+  const isLikelyId = (v: string) => {
+    const s = String(v ?? "").trim();
+    // Legacy sends sometimes store Discord user IDs in `by` (e.g., "3868999...").
+    // Filter out digit-only strings so the leaderboard only shows real usernames.
+    return /^\d{10,}$/.test(s);
+  };
+
+  const normalize = (v: any) => {
+    const s = String(v ?? "").trim();
+    if (!s) return "";
+    const lower = s.toLowerCase();
+    if (lower === "null" || lower === "undefined") return "";
+    if (isLikelyId(s)) return "";
+    return s;
+  };
+
+  // Modern: sends[] entries (preferred)
+  if (Array.isArray(r.sends)) {
+    for (const s of r.sends) {
+      // New format: `by` is the moderator name (e.g., "YraX")
+      // Legacy format: `name` is the moderator name, `by` is the Discord ID.
+      const candidateBy = normalize((s as any)?.by);
+      const candidateName = normalize((s as any)?.name);
+      const picked = candidateBy || candidateName;
+      if (picked) set.add(picked);
+    }
+  }
+
+  // Legacy: sendNames[]
+  if (Array.isArray(r.sendNames)) {
+    for (const n of r.sendNames) {
+      const name = normalize(n);
+      if (name) set.add(name);
+    }
+  }
+
+  return Array.from(set);
 }
 
 export default function HomePage() {
@@ -105,8 +139,9 @@ export default function HomePage() {
   const stats = useMemo(() => {
     let total = involved.length;
     let pending = 0;
-    let accepted = 0;
-    let sends = 0;
+    let acceptedLevels = 0;
+    let levelsSending = 0;
+    let totalUniqueSends = 0;
     let rated = 0;
     let rejected = 0;
 
@@ -114,14 +149,34 @@ export default function HomePage() {
       const st = statusFromRequest(r);
 
       if (st === "pending") pending++;
-      if (st === "sending") sends++;
+      if (st === "sending") levelsSending++;
       if (st === "rated") rated++;
       if (st === "rejected") rejected++;
 
-      if (isAccepted(r)) accepted++;
+      if (isAccepted(r)) acceptedLevels++;
+
+      // Global total sends: sum unique senders per request (no duplicates per mod per request)
+      totalUniqueSends += uniqueSendersForRequest(r).length;
     }
 
-    return { total, pending, accepted, sends, rated, rejected };
+    return { total, pending, acceptedLevels, levelsSending, totalUniqueSends, rated, rejected };
+  }, [involved]);
+
+  const sendLeaderboard = useMemo(() => {
+    // Count unique sends per request (one per mod per level), then sum across all involved requests.
+    const counts = new Map<string, number>();
+    for (const r of involved) {
+      const senders = uniqueSendersForRequest(r);
+      for (const name of senders) {
+        counts.set(name, (counts.get(name) ?? 0) + 1);
+      }
+    }
+
+    const list = Array.from(counts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+    return list;
   }, [involved]);
 
   return (
@@ -136,9 +191,6 @@ export default function HomePage() {
               src="/slimefactory-requests.png"
               alt="The Slime Factory Requests"
               style={styles.logo}
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).style.display = "none";
-              }}
             />
           </div>
           <div style={{ ...styles.subtitle, paddingBottom: 10 }}>Geometry Dash Level Request Tracker</div>
@@ -159,13 +211,14 @@ export default function HomePage() {
             <div className="homePillRow" style={styles.pillRowSix}>
               <StatPill title="Total" value={loading ? "…" : stats.total} tone="total" icon="user" />
               <StatPill title="Pending" value={loading ? "…" : stats.pending} tone="pending" icon="clock" />
-              <StatPill title="Accepted" value={loading ? "…" : stats.sends} tone="accepted" icon="check" />
-              <StatPill title="Sends" value={loading ? "…" : stats.accepted} tone="sent" icon="rocket" />
+              <StatPill title="Accepted" value={loading ? "…" : stats.acceptedLevels} tone="accepted" icon="check" />
+              <StatPill title="Sends" value={loading ? "…" : stats.totalUniqueSends} tone="sent" icon="rocket" />
               <StatPill title="Rated" value={loading ? "…" : stats.rated} tone="rated" icon="sad" />
               <StatPill title="Rejected" value={loading ? "…" : stats.rejected} tone="rejected" icon="x" />
             </div>
           </section>
 
+          {/* Sends leaderboard */}
           {/* Quick Actions row */}
           <section style={styles.quickPanel}>
             <div style={styles.quickHeader}>Quick Actions</div>
@@ -187,6 +240,44 @@ export default function HomePage() {
                 className="homeQuickBtn--wide"
               />
             </div>
+          </section>
+
+
+          <section style={styles.leaderPanel} className="frosted-glass-strong slimePanel">
+            <div style={styles.panelTopRow}>
+              <div>
+                <div style={styles.panelHeader}>Sends Leaderboard</div>
+                <div style={styles.panelMeta}>
+                  <span style={styles.metaAsterisk}>Unique sends per level</span>
+                  <span style={styles.metaDot}>•</span>
+                  <span>Duplicates don’t count</span>
+                </div>
+              </div>
+            </div>
+
+            {loading ? (
+              <div style={{ opacity: 0.8, padding: 10 }}>Loading…</div>
+            ) : sendLeaderboard.length ? (
+              <div style={styles.leaderList}>
+                {sendLeaderboard.slice(0, 3).map((row) => (
+                  <div key={row.name} style={styles.leaderRow}>
+                    <div style={styles.leaderLeft}>
+                      <img
+                        src="/trophy.png"
+                        alt="Trophy"
+                        style={{ width: 18, height: 18, marginRight: 10, opacity: 0.95 }}
+                      />
+                      <span style={styles.leaderName}>{row.name}</span>
+                    </div>
+                    <div style={styles.leaderRight}>
+                      <span style={styles.leaderCount}>{row.count}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ opacity: 0.75, padding: 10 }}>No sends yet.</div>
+            )}
           </section>
 
           {/* About */}
@@ -462,6 +553,51 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 18,
     padding: "16px 18px 18px 18px",
     border: "1px solid rgba(255,255,255,0.12)",
+  },
+  leaderPanel: {
+    borderRadius: 18,
+    padding: "16px 18px 18px 18px",
+    border: "1px solid rgba(255,255,255,0.12)",
+  },
+  leaderList: {
+    display: "grid",
+    gap: 8,
+    marginTop: 8,
+  },
+  leaderRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    padding: "10px 12px",
+    borderRadius: 14,
+    background: "rgba(255,255,255,0.06)",
+    border: "1px solid rgba(255,255,255,0.12)",
+  },
+  leaderLeft: {
+    display: "flex",
+    alignItems: "center",
+    minWidth: 0,
+  },
+  leaderName: {
+    fontWeight: 900,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  leaderRight: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flex: "0 0 auto",
+  },
+  leaderCount: {
+    fontWeight: 950,
+    fontSize: 16,
+    padding: "6px 10px",
+    borderRadius: 999,
+    background: "rgba(120,70,255,0.22)",
+    border: "1px solid rgba(120,70,255,0.35)",
   },
   panelTopRow: {
     display: "flex",

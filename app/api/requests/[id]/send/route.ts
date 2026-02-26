@@ -134,6 +134,13 @@ export async function POST(
           source: "website",
           date: now,
           comment: comment,
+          // Announcement tracking (safe additive fields)
+          announceStatus: "pending",
+          announceMessageId: null,
+          announceAttempts: 0,
+          lastAnnounceAttemptAt: null,
+          announcedAt: null,
+          lastAnnounceError: null,
         },
       },
       $set: {
@@ -141,6 +148,8 @@ export async function POST(
         "sync.reason": "send",
         "sync.sendId": sendId,
         "sync.updatedAt": now,
+        "discord.refreshPending": true,
+        "discord.refreshUpdatedAt": now,
       },
     };
 

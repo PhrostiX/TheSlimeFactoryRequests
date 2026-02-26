@@ -95,11 +95,23 @@ export async function POST(
       $push: {
         rejections: {
           id: rejectId,
-          name: profile, // profile name automatically
+          // Keep legacy keys used by older watcher/embed code
+          name: profile,
           reason: comment,
           link: null,
           by: null,
           date: now,
+
+          // Modern announcement fields (match sends)
+          source: "website",
+          byName: profile,
+          comment: comment,
+          announceStatus: "pending",
+          announceMessageId: null,
+          announceAttempts: 0,
+          lastAnnounceAttemptAt: null,
+          announcedAt: null,
+          lastAnnounceError: null,
         },
       },
       $set: {
@@ -107,6 +119,8 @@ export async function POST(
         "sync.reason": "reject",
         "sync.rejectId": rejectId,
         "sync.updatedAt": now,
+        "discord.refreshPending": true,
+        "discord.refreshUpdatedAt": now,
       },
     };
 

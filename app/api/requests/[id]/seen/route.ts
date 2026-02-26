@@ -89,6 +89,8 @@ export async function POST(
               "sync.pending": true,
               "sync.reason": "unsee",
               "sync.updatedAt": now,
+              "discord.refreshPending": true,
+              "discord.refreshUpdatedAt": now,
             },
           }
         : {
@@ -97,6 +99,8 @@ export async function POST(
               "sync.pending": true,
               "sync.reason": "seen",
               "sync.updatedAt": now,
+              "discord.refreshPending": true,
+              "discord.refreshUpdatedAt": now,
             },
           };
 

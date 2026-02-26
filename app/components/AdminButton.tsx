@@ -80,6 +80,12 @@ export default function AdminButton() {
 
     await refresh();
     setOpen(false);
+
+    // The search page reads admin state on mount; a hard reload ensures the
+    // correct admin buttons/permissions render immediately after switching.
+    if (typeof window !== "undefined") {
+      window.location.reload();
+    }
   }
 
   async function logout() {

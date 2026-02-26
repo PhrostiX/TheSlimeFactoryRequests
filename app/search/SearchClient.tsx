@@ -427,14 +427,11 @@ type Filters = {
   | "legendary"
   | "mythic"
   | "unassigned";
-  // New merged view control (drives the legacy flags below)
-  myView: "all" | "hide_seen" | "only_seen" | "only_mine" | "unchecked_only";
-  // Legacy controls kept for backwards compatibility / simpler filtering logic
-  myVisibility: "all" | "hide_sent" | "hide_rejected" | "hide_both";
-  hideSeen: boolean;
-  // Extra flags needed by the new My View dropdown
-  onlySeen: boolean;
-  onlyMine: boolean;
+  // Personal view filters for your active moderator profile.
+  // "checked" = you have either marked it seen OR logged a send OR logged a reject.
+  myView: "all" | "hide_checked" | "only_checked";
+  hideChecked: boolean;
+  onlyChecked: boolean;
   sort: SortKey;
 };
 
@@ -446,10 +443,8 @@ const DEFAULT_FILTERS: Filters = {
   platformer: "any",
   helperRating: "any",
   myView: "all",
-  myVisibility: "all",
-  hideSeen: false,
-  onlySeen: false,
-  onlyMine: false,
+  hideChecked: false,
+  onlyChecked: false,
   sort: "requested_desc",
 };
 
@@ -1033,11 +1028,9 @@ function FilterBar({
       aria-label="My View"
       title="Personal view filters for your active moderator profile"
     >
-      <option value="all">My View: Show all</option>
-      {canSeen ? <option value="hide_seen">My View: Hide seen</option> : null}
-      {canSeen ? <option value="only_seen">My View: Only seen</option> : null}
-      <option value="only_mine">My View: Only mine</option>
-      <option value="unchecked_only">My View: Unchecked only</option>
+      <option value="all">My View: No filter</option>
+      <option value="hide_checked">My View: Hide checked</option>
+      <option value="only_checked">My View: Only checked</option>
     </MiniSelect>
   ) : null;
 
@@ -1493,27 +1486,24 @@ export default function SearchPage() {
 
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
 
-  // Persist the Hide Seen toggle per active admin profile
+  // Persist the "Hide checked" toggle per active admin profile
   useEffect(() => {
     if (!admin.isAdmin || !admin.profile) return;
     try {
-      const key = `slime_hideSeen:${admin.profile}`;
+      const key = `slime_hideChecked:${admin.profile}`;
       const raw = window.localStorage.getItem(key);
       if (raw === "1" || raw === "true") {
         setFilters((p) => ({
           ...p,
-          hideSeen: true,
-          // Only update the view mode if user hasn't picked a different one
-          myView: p.myView === "all" || p.myView === "hide_seen" ? "hide_seen" : p.myView,
-          onlySeen: p.onlySeen ?? false,
-          onlyMine: p.onlyMine ?? false,
+          hideChecked: true,
+          myView: p.myView === "all" || p.myView === "hide_checked" ? "hide_checked" : p.myView,
         }));
       }
       if (raw === "0" || raw === "false") {
         setFilters((p) => ({
           ...p,
-          hideSeen: false,
-          myView: p.myView === "hide_seen" ? "all" : p.myView,
+          hideChecked: false,
+          myView: p.myView === "hide_checked" ? "all" : p.myView,
         }));
       }
     } catch {
@@ -1525,12 +1515,12 @@ export default function SearchPage() {
   useEffect(() => {
     if (!admin.isAdmin || !admin.profile) return;
     try {
-      const key = `slime_hideSeen:${admin.profile}`;
-      window.localStorage.setItem(key, filters.hideSeen ? "1" : "0");
+      const key = `slime_hideChecked:${admin.profile}`;
+      window.localStorage.setItem(key, filters.hideChecked ? "1" : "0");
     } catch {
       // ignore
     }
-  }, [admin.isAdmin, admin.profile, filters.hideSeen]);
+  }, [admin.isAdmin, admin.profile, filters.hideChecked]);
 
   const RATINGS = ["send-only", "feature", "epic", "legendary", "mythic"] as const;
   type Rating = (typeof RATINGS)[number];
@@ -1556,6 +1546,10 @@ export default function SearchPage() {
   const [seenModalOpen, setSeenModalOpen] = useState(false);
   const [seenTargetId, setSeenTargetId] = useState<string | null>(null);
   const [seenUnsee, setSeenUnsee] = useState(false);
+  const [seenUnseeLocked, setSeenUnseeLocked] = useState(false);
+  const [seenUnseeLockMsg, setSeenUnseeLockMsg] = useState<string | null>(null);
+  const [seenActionDisabled, setSeenActionDisabled] = useState(false);
+  const [seenActionDisabledMsg, setSeenActionDisabledMsg] = useState<string | null>(null);
   const [seenSubmitting, setSeenSubmitting] = useState(false);
   const [seenError, setSeenError] = useState<string | null>(null);
 
@@ -1585,20 +1579,61 @@ export default function SearchPage() {
   function openSeenModal(requestId: string) {
     setSeenTargetId(requestId);
     setSeenError(null);
+    setSeenActionDisabled(false);
+    setSeenActionDisabledMsg(null);
+
+    const mine = admin.profile ?? "";
+    const target = rows.find((r) => String(r._id) === String(requestId));
+
+    const mySent =
+      !!mine &&
+      !!target &&
+      Array.isArray((target as any).sends) &&
+      (target as any).sends.some((s: any) => safeStr(s?.by ?? s?.name) === mine);
+    const myRej =
+      !!mine &&
+      !!target &&
+      Array.isArray((target as any).rejections) &&
+      (target as any).rejections.some((rr: any) => safeStr(rr?.by ?? rr?.name) === mine);
+
+    const lock = !!mySent || !!myRej;
+    // If you've already sent or rejected it, this request is already "checked" for you.
+    // In that case, don't allow using the Seen button at all (no see/unsee).
+    if (lock) {
+      setSeenActionDisabled(true);
+      setSeenUnseeLocked(true);
+      const why = mySent && myRej ? "sent and rejected" : mySent ? "sent" : "rejected";
+      setSeenActionDisabledMsg(
+        `You can't use Already Seen here because you've already ${why} this level. It is automatically considered checked for your profile.`
+      );
+      setSeenUnsee(false);
+      setSeenModalOpen(true);
+      return;
+    }
+
+    setSeenUnseeLocked(false);
+    setSeenUnseeLockMsg(null);
 
     // Default behavior:
     // - If you've already marked it seen, default checkbox to "Unsee".
     // - Otherwise default to marking seen.
-    const mine = admin.profile ?? "";
-    const target = rows.find((r) => String(r._id) === String(requestId));
     const isSeen =
       !!mine && !!target && Array.isArray((target as any).seenBy) && (target as any).seenBy.includes(mine);
+
     setSeenUnsee(isSeen);
     setSeenModalOpen(true);
   }
 
   async function submitSeen() {
     if (!seenTargetId) return;
+    if (seenActionDisabled) {
+      setSeenError(seenActionDisabledMsg || "You can't use Already Seen for this level.");
+      return;
+    }
+    if (seenUnsee && seenUnseeLocked) {
+      setSeenError(seenUnseeLockMsg || "You can't unsee this level.");
+      return;
+    }
     setSeenSubmitting(true);
     setSeenError(null);
     try {
@@ -1816,25 +1851,16 @@ export default function SearchPage() {
       if (admin.isAdmin && admin.profile) {
         const p = admin.profile;
         const seen = Array.isArray(x.r.seenBy) && x.r.seenBy.includes(p);
-        const mySent = Array.isArray(x.r.sends) && x.r.sends.some((s) => safeStr((s as any)?.by) === p);
+        const mySent =
+          Array.isArray(x.r.sends) &&
+          x.r.sends.some((s) => safeStr((s as any)?.by ?? (s as any)?.name) === p);
         const myRej =
-          Array.isArray(x.r.rejections) && x.r.rejections.some((rr) => safeStr((rr as any)?.name) === p);
-        const mine = mySent || myRej;
+          Array.isArray(x.r.rejections) &&
+          x.r.rejections.some((rr) => safeStr((rr as any)?.by ?? (rr as any)?.name) === p);
 
-        // Hide seen
-        if (canSeen && filters.hideSeen && seen) return false;
-        // Only seen
-        if (canSeen && filters.onlySeen && !seen) return false;
-
-        // Only mine
-        if (filters.onlyMine && !mine) return false;
-
-        // Legacy: hide levels the current mod has already sent/rejected
-        if (filters.myVisibility !== "all") {
-          if (filters.myVisibility === "hide_sent" && mySent) return false;
-          if (filters.myVisibility === "hide_rejected" && myRej) return false;
-          if (filters.myVisibility === "hide_both" && mine) return false;
-        }
+        const checked = seen || mySent || myRej;
+        if (filters.hideChecked && checked) return false;
+        if (filters.onlyChecked && !checked) return false;
       }
 
       if (text) {
@@ -1960,24 +1986,16 @@ export default function SearchPage() {
 
   function setMyView(next: Filters["myView"]) {
     setFilters((p) => {
-      // Defaults
-      let hideSeen = false;
-      let onlySeen = false;
-      let onlyMine = false;
-      let myVisibility: Filters["myVisibility"] = "all";
-
-      if (next === "hide_seen") hideSeen = true;
-      if (next === "only_seen") onlySeen = true;
-      if (next === "only_mine") onlyMine = true;
-      if (next === "unchecked_only") myVisibility = "hide_both";
+      let hideChecked = false;
+      let onlyChecked = false;
+      if (next === "hide_checked") hideChecked = true;
+      if (next === "only_checked") onlyChecked = true;
 
       return {
         ...p,
         myView: next,
-        hideSeen,
-        onlySeen,
-        onlyMine,
-        myVisibility,
+        hideChecked,
+        onlyChecked,
       };
     });
   }
@@ -2276,52 +2294,94 @@ export default function SearchPage() {
               <p style={{ opacity: 0.82, marginTop: 10, lineHeight: 1.35 }}>
                 Profile: <b>{admin.profile ?? "—"}</b>
                 <br />
-                This updates the request silently (no pings) and will only be hidden when your <b>Hide Seen</b> filter
-                is enabled.
+                This updates the request silently (no pings). "Checked" means you have <b>Seen</b> it or logged a
+                <b> Send</b> or <b>Reject</b>. Use <b>Hide checked</b> to hide things you already handled.
               </p>
 
-              <label
-                style={{
-                  display: "flex",
-                  gap: 10,
-                  alignItems: "center",
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  background: "#0f1020",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  userSelect: "none",
-                  marginTop: 10,
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={!!seenUnsee}
-                  onChange={(e) => setSeenUnsee(e.target.checked)}
-                  style={{ width: 18, height: 18 }}
-                />
-                <span style={{ opacity: 0.92, fontWeight: 800 }}>
-                  Unsee (remove my name from Seen By)
-                </span>
-              </label>
+              {seenActionDisabled ? (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: 12,
+                    borderRadius: 12,
+                    background: "rgba(255,255,255,0.06)",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                  }}
+                >
+                  <p style={{ margin: 0, opacity: 0.92, lineHeight: 1.35, fontWeight: 800 }}>
+                    {seenActionDisabledMsg}
+                  </p>
+                  <button
+                    onClick={() => setSeenModalOpen(false)}
+                    style={{
+                      marginTop: 12,
+                      padding: "10px 12px",
+                      borderRadius: 12,
+                      fontWeight: 900,
+                      background: "rgba(255,255,255,0.14)",
+                      border: "1px solid rgba(255,255,255,0.18)",
+                      color: "white",
+                      cursor: "pointer",
+                      width: "100%",
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <label
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      alignItems: "center",
+                      padding: "10px 12px",
+                      borderRadius: 12,
+                      background: "#0f1020",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      userSelect: "none",
+                      marginTop: 10,
+                      opacity: seenUnseeLocked ? 0.65 : 1,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!seenUnsee}
+                      onChange={(e) => setSeenUnsee(e.target.checked)}
+                      disabled={seenUnseeLocked}
+                      style={{ width: 18, height: 18 }}
+                    />
+                    <span style={{ opacity: 0.92, fontWeight: 800 }}>
+                      Unsee (remove my name from Seen By)
+                    </span>
+                  </label>
 
-              <button
-                onClick={submitSeen}
-                disabled={seenSubmitting}
-                style={{
-                  marginTop: 12,
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  fontWeight: 900,
-                  background: "rgba(234, 179, 8, 0.22)",
-                  border: "1px solid rgba(234, 179, 8, 0.35)",
-                  color: "white",
-                  cursor: "pointer",
-                  opacity: seenSubmitting ? 0.7 : 1,
-                  width: "100%",
-                }}
-              >
-                {seenSubmitting ? "Working…" : seenUnsee ? "Confirm Unsee" : "Confirm Seen"}
-              </button>
+                  {seenUnseeLocked && seenUnseeLockMsg ? (
+                    <p style={{ marginTop: 8, opacity: 0.85, lineHeight: 1.35 }}>
+                      <b>Note:</b> {seenUnseeLockMsg}
+                    </p>
+                  ) : null}
+
+                  <button
+                    onClick={submitSeen}
+                    disabled={seenSubmitting}
+                    style={{
+                      marginTop: 12,
+                      padding: "10px 12px",
+                      borderRadius: 12,
+                      fontWeight: 900,
+                      background: "rgba(234, 179, 8, 0.22)",
+                      border: "1px solid rgba(234, 179, 8, 0.35)",
+                      color: "white",
+                      cursor: "pointer",
+                      opacity: seenSubmitting ? 0.7 : 1,
+                      width: "100%",
+                    }}
+                  >
+                    {seenSubmitting ? "Working…" : seenUnsee ? "Confirm Unsee" : "Confirm Seen"}
+                  </button>
+                </>
+              )}
 
               {seenError && <p style={{ marginTop: 10, color: "tomato", fontWeight: 700 }}>{seenError}</p>}
             </div>
