@@ -18,6 +18,7 @@ export default function TabNav() {
     { name: "Home", href: "/" },
     { name: "Search", href: "/search" },
     { name: "About", href: "/about" },
+    { name: "Changelog", href: "/changelog" },
     { name: "Contributors", href: "/contributors" },
     {
       name: "Discord",

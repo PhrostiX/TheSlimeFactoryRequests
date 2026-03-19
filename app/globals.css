@@ -470,3 +470,15 @@ body > * {
     --home-logo-ml: 0px;
   }
 }
+
+
+@media (max-width: 980px) {
+  .contributorsGridPrimary {
+    grid-template-columns: 1fr !important;
+  }
+}
+@media (max-width: 720px) {
+  .contributorsGridSecondary {
+    grid-template-columns: 1fr !important;
+  }
+}

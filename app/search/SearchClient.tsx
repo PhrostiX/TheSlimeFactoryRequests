@@ -91,7 +91,7 @@ type MongoRequest = {
   updatedAt?: string;
 };
 
-type TagKey = "pending" | "sending" | "rated" | "rejected" | "stolen" | "dne";
+type TagKey = "pending" | "sending" | "rated" | "rejected" | "stolen" | "dne" | "vip" | "req";
 type SortKey =
   | "requested_desc"
   | "requested_asc"
@@ -168,6 +168,74 @@ function clamp(n: number, a: number, b: number) {
 
 function safeStr(v: any) {
   return String(v ?? "").trim();
+}
+
+function normalizeModName(raw: any): string {
+  const original = String(raw ?? '').trim();
+  if (!original) return '';
+  let s = original.toLowerCase();
+  s = s.replace(/^@+/, '').replace(/[^a-z0-9]/g, '');
+  const aliases: Record<string,string> = {
+    btwmag: 'Mag',
+    mag: 'Mag',
+    yrax: 'YraX',
+    incidius: 'Incidius',
+    perox8: 'Perox8',
+    waffl3x: 'Waffl3X',
+    gusearth: 'Gusearth',
+    dashty: 'DashTY',
+  };
+  if (aliases[s]) return aliases[s];
+  return original;
+}
+
+function isRemovedRequest(r: MongoRequest) {
+  return r?.checkFilter === false || String((r as any)?.status || '').toLowerCase() === 'removed' || !!(r as any)?.special?.removed;
+}
+
+function uniqueSendersForRequest(r: any): string[] {
+  const set = new Set<string>();
+
+  const isLikelyId = (v: string) => {
+    const s = String(v ?? "").trim();
+    return /^\d{10,}$/.test(s);
+  };
+
+  const normalize = (v: any) => {
+    const s = String(v ?? "").trim();
+    if (!s) return "";
+    const lower = s.toLowerCase();
+    if (lower === "null" || lower === "undefined") return "";
+    if (isLikelyId(s)) return "";
+    return normalizeModName(s);
+  };
+
+  if (Array.isArray(r?.sends)) {
+    for (const s of r.sends) {
+      const candidateBy = normalize((s as any)?.by);
+      const candidateName = normalize((s as any)?.name);
+      const picked = candidateBy || candidateName;
+      if (picked) set.add(picked);
+    }
+  }
+
+  if (Array.isArray(r?.sendNames)) {
+    for (const n of r.sendNames) {
+      const name = normalize(n);
+      if (name) set.add(name);
+    }
+  }
+
+  return Array.from(set);
+}
+
+function isVipRequest(r: MongoRequest) {
+  return !!((r as any)?.special?.vip || (r as any)?.vipRequest || (r as any)?.vip === true || String((r as any)?.note || '').toLowerCase().includes('[vip]'));
+}
+
+function isReqRequest(r: MongoRequest) {
+  const special = (r as any)?.special;
+  return String(special || '').toLowerCase() === 'level_request' || !!(r as any)?.geode || String((r as any)?.submitterSource || '').toLowerCase().includes('level request');
 }
 
 function toInt(v: any) {
@@ -402,6 +470,12 @@ function triLabel(t: Tri) {
   return "No";
 }
 
+function triTagLabel(t: "all" | "only" | "hide") {
+  if (t === "all") return "Any";
+  if (t === "only") return "Only";
+  return "Hide";
+}
+
 function getRandomBannerText(levelId: string | number): string {
   const idStr = String(levelId);
   const lastTwo = idStr.slice(-2);
@@ -433,6 +507,9 @@ type Filters = {
   hideChecked: boolean;
   onlyChecked: boolean;
   sort: SortKey;
+  vip: "all" | "only" | "hide";
+  req: "all" | "only" | "hide";
+  sentByMod: string;
 };
 
 const DEFAULT_FILTERS: Filters = {
@@ -446,6 +523,9 @@ const DEFAULT_FILTERS: Filters = {
   hideChecked: false,
   onlyChecked: false,
   sort: "requested_desc",
+  vip: "all",
+  req: "all",
+  sentByMod: "",
 };
 
 function normalizeHelperRating(raw: any): Filters["helperRating"] {
@@ -640,6 +720,8 @@ function StatusChip({ tag }: { tag: TagKey }) {
     rejected: { text: "Not Accepted", style: styles.tagRejected },
     stolen: { text: "Stolen", style: styles.tagStolen },
     dne: { text: "Does not exist", style: styles.tagDNE },
+    vip: { text: "VIP", style: styles.tagVIP },
+    req: { text: "Req", style: styles.tagReq },
   }[tag];
 
   return (
@@ -681,6 +763,8 @@ function RequestCard({
 
   const tagObj = statusFromRequest(r);
   const tag = tagObj.key;
+  const vip = isVipRequest(r);
+  const reqTag = isReqRequest(r);
 
   const isPlatformer = !!r.levelInfo?.platformer;
   const count = getCount(r);
@@ -707,10 +791,10 @@ function RequestCard({
 
   const bannerText = getRandomBannerText(id);
 
-  const showSendsInfo = totalSends(r) > 0 || tag === "rated";
+  const showSendsInfo = totalSends(r) > 0 || (tag === "sending" && totalSends(r) === 0);
 
   return (
-    <div style={styles.cardMega} className="requestCard">
+    <div style={styles.cardMega} className="requestCard" data-vip={isVipRequest(r) ? "true" : "false"}>
       <div style={styles.topStrip} className="card-top-strip">
         <div style={styles.topStripLeft}>
           <span style={styles.topStripStar}>★</span>
@@ -718,16 +802,22 @@ function RequestCard({
         </div>
 
         {showSendsInfo ? (
-          <div style={styles.topStripMid} className="card-top-strip-mid">
-            <div style={styles.topMiniLine}>
-              <span style={styles.topMiniLabel}>Last send:</span>{" "}
-              <span style={styles.topMiniValue}>{lastRelative}</span>
-            </div>
-            <div style={styles.topMiniLine}>
-              <span style={styles.topMiniLabel}>Total sends:</span>{" "}
-              <span style={styles.topMiniValue}>{sends}</span>
-            </div>
-          </div>
+          <button onClick={() => onViewLog(r)} style={styles.topStripMidButton} className="card-top-strip-mid bounceHint" title="View details">
+            {sends > 0 ? (
+              <>
+                <div style={styles.topMiniLine}>
+                  <span style={styles.topMiniLabel}>Last send:</span>{" "}
+                  <span style={styles.topMiniValue}>{lastRelative}</span>
+                </div>
+                <div style={styles.topMiniLine}>
+                  <span style={styles.topMiniLabel}>Total sends:</span>{" "}
+                  <span style={styles.topMiniValue}>{sends}</span>
+                </div>
+              </>
+            ) : (
+              <div style={{ ...styles.topMiniValue, fontWeight: 800 }}>No sends yet</div>
+            )}
+          </button>
         ) : (
           <div />
         )}
@@ -801,6 +891,8 @@ function RequestCard({
                   className="card-tag-inline-wrap statusTagWrap"
                 >
                   <StatusChip tag={tag} />
+                  {vip ? <StatusChip tag="vip" /> : null}
+                  {reqTag ? <StatusChip tag="req" /> : null}
                 </div>
               </div>
 
@@ -870,7 +962,6 @@ function RequestCard({
             )}
           </div>
 
-          {/* Admin buttons */}
           {showAdminActions ? (
             <div style={styles.sendBtnRow}>
               {canSend ? (
@@ -902,13 +993,15 @@ function RequestCard({
                   Already Seen
                 </button>
               ) : null}
+
               <button
                 onClick={() => onViewLog(r)}
-                style={styles.viewLogPill}
-                title="View details and history"
+                style={styles.viewDetailsPill}
+                title="View request details"
               >
                 View Details
               </button>
+
             </div>
           ) : null}
         </div>
@@ -1017,6 +1110,21 @@ function FilterBar({
       <option value="epic">Suggested Rating: Epic</option>
       <option value="legendary">Suggested Rating: Legendary</option>
       <option value="mythic">Suggested Rating: Mythic</option>
+    </MiniSelect>
+  ) : null;
+
+  const sentByModSelect = admin.isAdmin ? (
+    <MiniSelect
+      value={filters.sentByMod}
+      onChange={(e) => setFilters((p) => ({ ...p, sentByMod: e.target.value }))}
+      style={{ width: isMobile ? "100%" : 200 }}
+      aria-label="Sent by Moderator"
+      title="Filter requests by moderator send history"
+    >
+      <option value="">Sent by Mod: Any</option>
+      {["YraX","Incidius","Perox8","Waffl3X","Gusearth","Mag","DashTY"].map((m) => (
+        <option key={m} value={m}>{`Sent by Mod: ${m}`}</option>
+      ))}
     </MiniSelect>
   ) : null;
 
@@ -1185,6 +1293,18 @@ function FilterBar({
           <div style={styles.popLabel}>Platformer?</div>
           <button type="button" onClick={() => cycleTri("platformer")} style={styles.triBtn} className="triBtn">
             {triLabel(filters.platformer)}
+          </button>
+        </div>
+        <div>
+          <div style={styles.popLabel}>VIP?</div>
+          <button type="button" onClick={() => setFilters((p) => ({ ...p, vip: p.vip === "all" ? "only" : p.vip === "only" ? "hide" : "all" }))} style={styles.triBtn} className="triBtn">
+            {triTagLabel(filters.vip)}
+          </button>
+        </div>
+        <div>
+          <div style={styles.popLabel}>Req?</div>
+          <button type="button" onClick={() => setFilters((p) => ({ ...p, req: p.req === "all" ? "only" : p.req === "only" ? "hide" : "all" }))} style={styles.triBtn} className="triBtn">
+            {triTagLabel(filters.req)}
           </button>
         </div>
       </div>
@@ -1359,6 +1479,18 @@ function FilterBar({
                   {triLabel(filters.platformer)}
                 </button>
               </div>
+              <div>
+                <div style={styles.popLabel}>VIP?</div>
+                <button type="button" onClick={() => setFilters((p) => ({ ...p, vip: p.vip === "all" ? "only" : p.vip === "only" ? "hide" : "all" }))} style={styles.triBtn}>
+                  {triTagLabel(filters.vip)}
+                </button>
+              </div>
+              <div>
+                <div style={styles.popLabel}>Req?</div>
+                <button type="button" onClick={() => setFilters((p) => ({ ...p, req: p.req === "all" ? "only" : p.req === "only" ? "hide" : "all" }))} style={styles.triBtn}>
+                  {triTagLabel(filters.req)}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1383,7 +1515,7 @@ function FilterBar({
             <MiniInput
               value={filters.text}
               onChange={(e) => setFilters((p) => ({ ...p, text: e.target.value }))}
-              placeholder="Search…"
+              placeholder="Search level, ID, uploader, or Discord user ID…"
               aria-label="Search"
             />
           </div>
@@ -1406,7 +1538,7 @@ function FilterBar({
         <MiniInput
           value={filters.text}
           onChange={(e) => setFilters((p) => ({ ...p, text: e.target.value }))}
-          placeholder="Search (ID / level / uploader)…"
+          placeholder="Search (ID / level / uploader / Discord user ID)…"
           aria-label="Search"
         />
       </div>
@@ -1445,7 +1577,7 @@ function FilterBar({
         onClose={() => setMoreOpen(false)}
         width={280}
         button={
-          <FilterButton active={moreOpen || filters.hasVideo !== "any" || filters.platformer !== "any"} onClick={() => setMoreOpen((v) => !v)}>
+          <FilterButton active={moreOpen || filters.hasVideo !== "any" || filters.platformer !== "any" || filters.vip !== "all" || filters.req !== "all"} onClick={() => setMoreOpen((v) => !v)}>
             More ▾
           </FilterButton>
         }
@@ -1805,7 +1937,7 @@ export default function SearchPage() {
       const extraA = safeStr(r.extraQuestion?.answer);
 
       // ✅ one combined blob for fast search (lowercased once)
-      const searchBlob = [id, subId, levelName, uploaderName, desc, note, extraQ, extraA]
+      const searchBlob = [id, subId, levelName, uploaderName, desc, note, extraQ, extraA, safeStr(r.userId)]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
@@ -1819,7 +1951,10 @@ export default function SearchPage() {
       const platformer = !!r.levelInfo?.platformer;
       const hasVideo = !!youtubeThumb(safeStr(r.levelInfo?.videoUrl ?? r.videoUrl));
       const helperRating = normalizeHelperRating(r.helperReview?.rating);
+      const sentByMods = uniqueSendersForRequest(r).map(normalizeModName);
+      const vip = isVipRequest(r);
 
+      const req = isReqRequest(r);
       return {
         r,
         id,
@@ -1836,6 +1971,9 @@ export default function SearchPage() {
         platformer,
         hasVideo,
         helperRating,
+        sentByMods,
+        vip,
+        req,
         searchBlob,
       };
     });
@@ -1864,10 +2002,7 @@ export default function SearchPage() {
       }
 
       if (text) {
-        const hit =
-          x.id.toLowerCase().includes(text) ||
-          x.levelName.toLowerCase().includes(text) ||
-          x.uploaderName.toLowerCase().includes(text);
+        const hit = x.searchBlob.includes(text);
         if (!hit) return false;
       }
 
@@ -1887,6 +2022,11 @@ export default function SearchPage() {
       if (filters.helperRating !== "any") {
         if (x.helperRating !== filters.helperRating) return false;
       }
+      if (filters.vip === "only" && !x.vip) return false;
+      if (filters.vip === "hide" && x.vip) return false;
+      if ((filters as any).req === "only" && !x.req) return false;
+      if ((filters as any).req === "hide" && x.req) return false;
+      if (filters.sentByMod && !x.sentByMods.includes(filters.sentByMod)) return false;
 
       return true;
     });
@@ -2404,7 +2544,7 @@ export default function SearchPage() {
             <div
               onClick={(e) => e.stopPropagation()}
               style={{
-                width: "min(700px, 100%)",
+                width: "min(760px, 100%)",
                 maxHeight: "min(82vh, 900px)",
                 overflow: "auto",
                 borderRadius: 16,
@@ -2414,121 +2554,95 @@ export default function SearchPage() {
                 boxShadow: "0 12px 40px rgba(0,0,0,0.45)",
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>Request Log</h3>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                <div style={{ width: 32 }} />
+                <div
+                  style={{
+                    margin: 0,
+                    fontSize: 28,
+                    fontWeight: 900,
+                    textAlign: "center",
+                    flex: 1,
+                    padding: "10px 16px",
+                    borderRadius: 999,
+                    border: "1px solid rgba(244,114,182,0.35)",
+                    background: "rgba(236,72,153,0.16)",
+                    color: "#ffd1ea",
+                  }}
+                >
+                  View Details
+                </div>
                 <button onClick={() => setLogModalOpen(false)} style={{ opacity: 0.8 }}>
                   ✕
                 </button>
               </div>
 
-              <p style={{ opacity: 0.85, marginTop: 10, marginBottom: 12 }}>
-                <b>{safeStr(logTarget.levelInfo?.name) || "—"}</b> &nbsp;•&nbsp; Request ID:{" "}
-                <b>{safeStr(logTarget._id) || "—"}</b>
-              </p>
+              <div style={{ height: 12 }} />
 
               <div style={{ display: "grid", gap: 12 }}>
-                <div
-                  style={{
-                    borderRadius: 14,
-                    padding: 12,
-                    border: "1px solid rgba(255,255,255,0.10)",
-                    background: "rgba(255,255,255,0.04)",
-                  }}
-                >
+                <div style={{ borderRadius: 14, padding: 12, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
                   <div style={{ fontWeight: 900, marginBottom: 8 }}>Sends</div>
                   {Array.isArray(logTarget.sends) && logTarget.sends.length ? (
                     <div style={{ display: "grid", gap: 6 }}>
                       {logTarget.sends
                         .slice()
-                        .sort((a, b) => (b.date ?? 0) - (a.date ?? 0))
-                        .map((s, idx) => (
-                          <div key={String((s as any)?.id ?? idx)} style={{ opacity: 0.9 }}>
-                            • {safeStr((s as any)?.by) || "—"}
-                          </div>
-                        ))}
+                        .sort((a:any, b:any) => (b.date ?? 0) - (a.date ?? 0))
+                        .map((s:any, idx:number) => {
+                          const by = normalizeModName((s as any)?.by || (s as any)?.name) || "—";
+                          const type = safeStr((s as any)?.type);
+                          const label = type ? `${type.charAt(0).toUpperCase()}${type.slice(1)}` : "Send";
+                          return (
+                            <div key={String((s as any)?.id ?? idx)} style={{ opacity: 0.92 }}>
+                              • {by} — {label}
+                            </div>
+                          );
+                        })}
                     </div>
                   ) : (
-                    <div style={{ opacity: 0.75 }}>—</div>
+                    <div style={{ opacity: 0.75 }}>None</div>
                   )}
                 </div>
 
-                <div
-                  style={{
-                    borderRadius: 14,
-                    padding: 12,
-                    border: "1px solid rgba(255,255,255,0.10)",
-                    background: "rgba(255,255,255,0.04)",
-                  }}
-                >
+                <div style={{ borderRadius: 14, padding: 12, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
                   <div style={{ fontWeight: 900, marginBottom: 8 }}>Seen By</div>
                   {Array.isArray(logTarget.seenBy) && logTarget.seenBy.length ? (
                     <div style={{ display: "grid", gap: 6 }}>
-                      {logTarget.seenBy.map((n, idx) => (
+                      {logTarget.seenBy.map((n:any, idx:number) => (
                         <div key={`${n}-${idx}`} style={{ opacity: 0.9 }}>
                           • {safeStr(n) || "—"}
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div style={{ opacity: 0.75 }}>—</div>
+                    <div style={{ opacity: 0.75 }}>None</div>
                   )}
                 </div>
 
-                <div
-                  style={{
-                    borderRadius: 14,
-                    padding: 12,
-                    border: "1px solid rgba(255,255,255,0.10)",
-                    background: "rgba(255,255,255,0.04)",
-                  }}
-                >
+                <div style={{ borderRadius: 14, padding: 12, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
                   <div style={{ fontWeight: 900, marginBottom: 8 }}>Rejections</div>
                   {Array.isArray(logTarget.rejections) && logTarget.rejections.length ? (
                     <div style={{ display: "grid", gap: 6 }}>
                       {logTarget.rejections
                         .slice()
-                        .sort((a, b) => (b.date ?? 0) - (a.date ?? 0))
-                        .map((rr, idx) => (
+                        .sort((a:any, b:any) => (b.date ?? 0) - (a.date ?? 0))
+                        .map((rr:any, idx:number) => (
                           <div key={String((rr as any)?.id ?? idx)} style={{ opacity: 0.9 }}>
-                            • {safeStr((rr as any)?.name) || "—"}
+                            • {safeStr((rr as any)?.name || (rr as any)?.by) || "—"}
                           </div>
                         ))}
                     </div>
                   ) : (
-                    <div style={{ opacity: 0.75 }}>—</div>
+                    <div style={{ opacity: 0.75 }}>None</div>
                   )}
                 </div>
 
-                <div
-                  style={{
-                    borderRadius: 14,
-                    padding: 12,
-                    border: "1px solid rgba(255,255,255,0.10)",
-                    background: "rgba(255,255,255,0.04)",
-                  }}
-                >
-                  <div style={{ fontWeight: 900, marginBottom: 8 }}>Extra Question</div>
-                  <div style={{ opacity: 0.85 }}>
-                    <div>
-                      <span style={{ opacity: 0.8 }}>Question:</span>{" "}
-                      {safeStr(logTarget.extraQuestion?.question) || ""}
-                    </div>
-                    <div style={{ marginTop: 6 }}>
-                      <span style={{ opacity: 0.8 }}>Answer:</span>{" "}
-                      {safeStr(logTarget.extraQuestion?.answer) || ""}
-                    </div>
-                  </div>
+                <div style={{ borderRadius: 14, padding: 12, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
+                  <div style={{ fontWeight: 900, marginBottom: 8 }}>Requester-specified sends</div>
+                  <div style={{ opacity: 0.9 }}>{safeStr(logTarget.extraQuestion?.answer) || "None"}</div>
                 </div>
 
-                <div
-                  style={{
-                    borderRadius: 14,
-                    padding: 12,
-                    border: "1px solid rgba(255,255,255,0.10)",
-                    background: "rgba(255,255,255,0.04)",
-                  }}
-                >
-                  <div style={{ fontWeight: 900, marginBottom: 8 }}>Helper Suggested Rating</div>
+                <div style={{ borderRadius: 14, padding: 12, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
+                  <div style={{ fontWeight: 900, marginBottom: 8 }}>Suggested Rating</div>
                   <div style={{ opacity: 0.85 }}>
                     {(() => {
                       const hr = normalizeHelperRating(logTarget.helperReview?.rating);
@@ -2557,11 +2671,30 @@ export default function SearchPage() {
           text-overflow: ellipsis;
         }
 
+        .bounceHint { animation: bounceHint 1.8s ease-in-out infinite; }
+        .bounceHint:hover { transform: translateY(-2px) scale(1.01); }
+        @keyframes bounceHint { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
         .requestCard {
           transform: translateY(0px);
           transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1),
             box-shadow 220ms cubic-bezier(0.4, 0, 0.2, 1);
           will-change: transform;
+        }
+        .requestCard[data-vip="true"]::before {
+          content: "";
+          position: absolute;
+          width: 180px; height: 180px;
+          right: -25px; top: -25px;
+          background: radial-gradient(circle, rgba(255,105,180,.22), transparent 68%);
+          pointer-events: none;
+        }
+        .requestCard[data-vip="true"]::after {
+          content: "";
+          position: absolute;
+          width: 120px; height: 120px;
+          left: -18px; bottom: -12px;
+          background: radial-gradient(circle, rgba(255,160,220,.14), transparent 70%);
+          pointer-events: none;
         }
         .requestCard:hover {
           transform: translateY(-3px);
@@ -2587,7 +2720,10 @@ export default function SearchPage() {
         @media (max-width: 820px) {
 
           /* --- Mobile-only: move the "Open in YouTube" link to the top-left of the whole card --- */
-          .requestCard {
+          .bounceHint { animation: bounceHint 1.8s ease-in-out infinite; }
+        .bounceHint:hover { transform: translateY(-2px) scale(1.01); }
+        @keyframes bounceHint { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+        .requestCard {
             position: relative;
           }
 
@@ -3240,8 +3376,19 @@ const styles: Record<string, React.CSSProperties> = {
     verticalAlign: "bottom",
   },
 
-  idRow: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginTop: 4 },
+  idRow: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
 
+  topStripMidButton: {
+    justifySelf: "center",
+    minWidth: 260,
+    borderRadius: 16,
+    padding: "10px 16px",
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(10,10,18,0.6)",
+    cursor: "pointer",
+    transition: "transform 180ms ease, filter 180ms ease",
+  },
+  viewSendsBtn: { borderRadius: 999, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.06)", color: "#fff", minHeight: 34, padding: "0 14px", fontSize: 14, fontWeight: 800, cursor: "pointer", opacity: 0.95 },
   idPill: {
     padding: "8px 12px",
     borderRadius: 12,
@@ -3391,5 +3538,15 @@ const styles: Record<string, React.CSSProperties> = {
   },
   tagDNE: {
     background: "linear-gradient(135deg, rgba(148,163,184,0.22), rgba(100,116,139,0.10))",
+  },
+  tagVIP: {
+    background: "linear-gradient(135deg, rgba(147,51,234,0.34), rgba(236,72,153,0.18))",
+    border: "1px solid rgba(217,70,239,0.34)",
+    color: "#faf5ff",
+  },
+  tagReq: {
+    background: "linear-gradient(135deg, rgba(132,204,22,0.40), rgba(74,222,128,0.22))",
+    border: "1px solid rgba(163,230,53,0.45)",
+    color: "#ecfccb",
   },
 };

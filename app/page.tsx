@@ -27,8 +27,16 @@ type MongoRequest = {
 
 type TagKey = "pending" | "sending" | "rated" | "rejected" | "stolen" | "dne";
 
+function normalizeModName(raw: any): string {
+  const original = String(raw ?? '').trim();
+  if (!original) return '';
+  let s = original.toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9]/g, '');
+  const aliases: Record<string,string> = { btwmag: 'Mag', mag: 'Mag', yrax: 'YraX', incidius: 'Incidius', perox8: 'Perox8', waffl3x: 'Waffl3X', gusearth: 'Gusearth', dashty: 'DashTY' };
+  return aliases[s] || original;
+}
+
 function isInvolvedMongo(r: MongoRequest) {
-  return r.checkFilter === true;
+  return r.checkFilter === true && !(r as any)?.special?.removed && String((r as any)?.status || '').toLowerCase() !== 'removed';
 }
 
 function latestReview(r: MongoRequest): Review | null {
@@ -85,7 +93,7 @@ function uniqueSendersForRequest(r: MongoRequest): string[] {
     const lower = s.toLowerCase();
     if (lower === "null" || lower === "undefined") return "";
     if (isLikelyId(s)) return "";
-    return s;
+    return normalizeModName(s);
   };
 
   // Modern: sends[] entries (preferred)
@@ -115,6 +123,7 @@ export default function HomePage() {
   const [rows, setRows] = useState<MongoRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string>("");
+  const [range, setRange] = useState<"all"|"daily"|"weekly"|"monthly">("all");
 
   useEffect(() => {
     setLoading(true);
@@ -134,7 +143,11 @@ export default function HomePage() {
       });
   }, []);
 
-  const involved = useMemo(() => rows.filter(isInvolvedMongo), [rows]);
+  const involved = useMemo(() => {
+    const now = Date.now();
+    const cutoff = range === "daily" ? now - 86400000 : range === "weekly" ? now - 7*86400000 : range === "monthly" ? now - 30*86400000 : 0;
+    return rows.filter((r) => isInvolvedMongo(r) && (!cutoff || new Date(r.createdAt || 0).getTime() >= cutoff));
+  }, [rows, range]);
 
   const stats = useMemo(() => {
     let total = involved.length;
@@ -201,10 +214,15 @@ export default function HomePage() {
               <div>
                 <div style={styles.panelHeader}>Global Stats</div>
                 <div style={styles.panelMeta}>
-                  <span style={styles.metaAsterisk}>All requested levels</span>
+                  <span style={styles.metaAsterisk}>{range === "all" ? "All requested levels" : range === "daily" ? "Last 24 hours" : range === "weekly" ? "Last 7 days" : "Last 30 days"}</span>
                   <span style={styles.metaDot}>•</span>
                   <span>Last updated: {updatedAt || "—"}</span>
                 </div>
+              </div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                {(["all","daily","weekly","monthly"] as const).map((key) => (
+                  <button key={key} onClick={() => setRange(key)} style={{padding:"9px 14px",borderRadius:999,border: range===key ? "1px solid rgba(255,255,255,.24)" : "1px solid rgba(255,255,255,.08)", background: range===key ? "rgba(126,92,255,.28)" : "rgba(255,255,255,.05)", color:"white", fontWeight:800, cursor:"pointer"}}>{key === "all" ? "All Time" : key.charAt(0).toUpperCase()+key.slice(1)}</button>
+                ))}
               </div>
             </div>
 
