@@ -20,6 +20,10 @@ export default function AdminButton() {
   function badgeFor(name: string) {
     const def = getAdminProfileDef(name);
     if (!def) return "/modbadge.png";
+    if (def.badge === "owner") return "/owner.png";
+    if (def.badge === "reviewer") return "/reviewer.png";
+    if (def.badge === "sender") return "/senders.png";
+    if (def.badge === "staff") return "/staff.png";
     return "/modbadge.png";
   }
 
