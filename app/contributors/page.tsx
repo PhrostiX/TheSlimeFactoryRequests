@@ -17,18 +17,20 @@ const BADGES: Record<BadgeKind, string> = {
 };
 
 export default function ContributorsPage() {
-  const allSections: Section[] = [
-    { title: "Developers & Owners", subtitle: "Builds and maintains the bot, website, and automation", names: CONTRIBUTOR_GROUPS.developersAndOwners, badge: "owner" },
-    { title: "Moderators", subtitle: "Full review, send, and management access", names: CONTRIBUTOR_GROUPS.moderators, badge: "mod" },
-    { title: "Reviewers", subtitle: "Reviews and helps process requests", names: CONTRIBUTOR_GROUPS.reviewers, badge: "reviewer" },
-    { title: "Trial Reviewers", subtitle: "Training and assisting with reviews", names: CONTRIBUTOR_GROUPS.trialReviewers, badge: "reviewer" },
-    { title: "Senders", subtitle: "Can add sends and reject notes", names: CONTRIBUTOR_GROUPS.senders, badge: "sender" },
-    { title: "Staff", subtitle: "Community and server support", names: CONTRIBUTOR_GROUPS.staffMembers, badge: "staff" },
-    { title: "Trial Staff", subtitle: "Assisting with staff duties", names: CONTRIBUTOR_GROUPS.trialStaff, badge: "staff" },
-  ].filter((section) => section.names.length > 0);
+  const allSections = [
+    { title: "Developers & Owners", subtitle: "Builds and maintains the bot, website, and automation", names: CONTRIBUTOR_GROUPS.developersAndOwners, badge: "owner" as BadgeKind },
+    { title: "Moderators", subtitle: "Full review, send, and management access", names: CONTRIBUTOR_GROUPS.moderators, badge: "mod" as BadgeKind },
+    { title: "Reviewers", subtitle: "Reviews and helps process requests", names: CONTRIBUTOR_GROUPS.reviewers, badge: "reviewer" as BadgeKind },
+    { title: "Trial Reviewers", subtitle: "Training and assisting with reviews", names: CONTRIBUTOR_GROUPS.trialReviewers, badge: "reviewer" as BadgeKind },
+    { title: "Senders", subtitle: "Can add sends and reject notes", names: CONTRIBUTOR_GROUPS.senders, badge: "sender" as BadgeKind },
+    { title: "Staff", subtitle: "Community and server support", names: CONTRIBUTOR_GROUPS.staffMembers, badge: "staff" as BadgeKind },
+    { title: "Trial Staff", subtitle: "Assisting with staff duties", names: CONTRIBUTOR_GROUPS.trialStaff, badge: "staff" as BadgeKind },
+  ] satisfies Section[];
 
-  const heroRow = allSections.filter((s) => ["Developers & Owners", "Moderators", "Reviewers"].includes(s.title));
-  const supportRow = allSections.filter((s) => !["Developers & Owners", "Moderators", "Reviewers"].includes(s.title));
+  const visibleSections: Section[] = allSections.filter((section) => section.names.length > 0);
+
+  const heroRow = visibleSections.filter((s) => ["Developers & Owners", "Moderators", "Reviewers"].includes(s.title));
+  const supportRow = visibleSections.filter((s) => !["Developers & Owners", "Moderators", "Reviewers"].includes(s.title));
 
   return (
     <>
