@@ -1,5 +1,5 @@
 export const DEVELOPERS_AND_OWNERS = "PhrostiX, dkirinor";
-export const MODERATORS = "YraX, Perox8, Incidius, Waffl3X, Gusearth, Infra";
+export const MODERATORS = "YraX, Perox8, Incidius, Waffl3X, Gusearth, Infra, GirlyAle2";
 export const REVIEWERS = "TechnoIH, Cyclone, Buzzli, Jorge_Mercurio, NormanRus";
 export const TRIAL_REVIEWERS = "";
 export const SENDERS = "Snowball, Delik";
